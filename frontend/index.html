@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Golampi IDE</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- Barra de acciones -->
+<div class="toolbar">
+    <button onclick="nuevo()">Limpiar</button>
+    <button onclick="document.getElementById('fileInput').click()">Cargar archivo</button>
+    <button onclick="guardarCodigo()">Guardar código</button>
+    <button onclick="ejecutar()">Ejecutar</button>
+    <button onclick="limpiarConsola()">Limpiar consola</button>
+    <input type="file" id="fileInput" style="display:none" onchange="cargarArchivo(event)">
+</div>
+
+
+<div class="container">
+
+    <!-- Editor -->
+    <div class="editor">
+        <div class="editor-container">
+            <pre id="lineNumbers">1</pre>
+            <textarea id="editor"
+                    placeholder="// Escribe tu código Golampi aquí"
+                    oninput="actualizarLineas()"
+                    onscroll="sincronizarScroll()"></textarea>
+        </div>
+    </div>
+
+    <!-- Panel de reportes -->
+    <div class="reports">
+        <h3>Reportes</h3>
+        <button onclick="descargarResultado()">Descargar resultado</button>
+        <button onclick="descargarErrores()">Descargar errores</button>
+        <button onclick="descargarSimbolos()">Descargar tabla de símbolos</button>
+    </div>
+
+    <!-- Consola -->
+    <div class="console" id="console">
+        Consola
+    </div>
+
+</div>
+ <script src="script.js"></script>
+</body>
+</html>
