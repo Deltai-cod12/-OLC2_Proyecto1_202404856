@@ -48,7 +48,7 @@ function ejecutar() {
 
     const codigo = document.getElementById("editor").value;
 
-    fetch("backend.php", {
+    fetch("../backend/Execute.php", {
         method: "POST",
         headers: {
             "Content-Type": "application/json"
@@ -58,8 +58,12 @@ function ejecutar() {
     .then(response => response.json())
     .then(data => {
         escribirConsola("=== Salida ===");
-        escribirConsola(data.salida || "Sin salida");
-
+        if (data.errores) {
+            escribirConsola("=== Error ===");
+            escribirConsola(data.errores);
+        } else {
+            escribirConsola(data.salida || "Sin salida");
+        }
         // Guardar para descargas
         window.reporteResultado = data.salida || "";
         window.reporteErrores = data.errores || "";

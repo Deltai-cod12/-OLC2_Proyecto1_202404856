@@ -36,7 +36,7 @@ statement
 ;
 
 statementCore
-: printStmt
+: functionCall
 | varDecl
 | constDecl
 | shortVarDecl
@@ -51,9 +51,6 @@ statementCore
 | expression
 ;
 
-printStmt
-: PRINT STRING
-;
 
 /* ---- Variables ---- */
 
@@ -289,7 +286,6 @@ returnStmt
 /* ---- Palabras reservadas ---- */
 
 FUNC   : 'func';
-PRINT  : 'print';
 VAR    : 'var';
 CONST  : 'const';
 NIL    : 'nil';

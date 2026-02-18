@@ -126,19 +126,6 @@ class GolampiBaseListener implements GolampiListener
 	 *
 	 * The default implementation does nothing.
 	 */
-	public function enterPrintStmt(Context\PrintStmtContext $context): void {}
-
-	/**
-	 * {@inheritdoc}
-	 *
-	 * The default implementation does nothing.
-	 */
-	public function exitPrintStmt(Context\PrintStmtContext $context): void {}
-	/**
-	 * {@inheritdoc}
-	 *
-	 * The default implementation does nothing.
-	 */
 	public function enterVarDecl(Context\VarDeclContext $context): void {}
 
 	/**
