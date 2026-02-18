@@ -22,7 +22,7 @@ require_once __DIR__ . '/../generated/GolampiBaseVisitor.php';
 
 // Interpreter
 require_once __DIR__ . '/interpreter/Interpreter.php';
-require_once __DIR__ . '/interpreter/Enviroment.php'; // (tu archivo se llama así)
+require_once __DIR__ . '/interpreter/Enviroment.php';
 require_once __DIR__ . '/interpreter/Symbol.php';
 require_once __DIR__ . '/interpreter/SymbolTable.php';
 
@@ -44,6 +44,17 @@ $data = json_decode($input, true);
 $codigo = $data["codigo"] ?? "";
 
 // ======================
+// ERROR REPORT (Singleton)
+// ======================
+
+$errorReport = ErrorReport::getInstance();
+$errorReport->clear();
+
+// Log del código recibido
+error_log("=== EJECUTANDO CÓDIGO ===");
+error_log($codigo);
+
+// ======================
 // ANTLR PARSER
 // ======================
 
@@ -59,24 +70,26 @@ $tree = $parser->program();
 // EJECUCIÓN
 // ======================
 
-$environment = new Environment();   // ← CORREGIDO (un solo $)
-$errorReport = new ErrorReport();
-$errorReport->add("Prueba de error");
-
+$environment = new Environment();
 $interpreter = new Interpreter($environment, $errorReport);
 
 $interpreter->visit($tree);
 
 // ======================
-// ERRORES SEMÁNTICOS → TERMINAL
+// ERRORES → TERMINAL
 // ======================
 
 $errors = $errorReport->getErrors();
 
 if (!empty($errors)) {
-    error_log("=== ERRORES SEMÁNTICOS ===");
+    error_log("=== ERRORES DETECTADOS ===");
     foreach ($errors as $err) {
-        error_log($err);
+        error_log(
+            "[" . $err["type"] . "] " .
+            $err["message"] .
+            " (L:" . $err["line"] .
+            " C:" . $err["column"] . ")"
+        );
     }
 }
 
@@ -85,7 +98,7 @@ if (!empty($errors)) {
 // ======================
 
 echo json_encode([
-    "salida"   => $interpreter->getOutput(),
-    "errores"  => implode("\n", $errors),
-    "simbolos" => json_encode($environment->getAll())
+    "salida" => $interpreter->getOutput(),
+    "errores" => $errors,   // ← ahora es arreglo estructurado
+    "simbolos" => $environment->getAll()
 ]);

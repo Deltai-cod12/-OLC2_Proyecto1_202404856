@@ -58,21 +58,18 @@ function ejecutar() {
     .then(response => response.json())
     .then(data => {
         escribirConsola("=== Salida ===");
-        if (data.errores) {
+        escribirConsola(data.salida || "Sin salida");
+
+        if (data.errores && data.errores.trim() !== "") {
             escribirConsola("=== Error ===");
             escribirConsola(data.errores);
-        } else {
-            escribirConsola(data.salida || "Sin salida");
         }
-        // Guardar para descargas
+
+        // Guardar para reportes
         window.reporteResultado = data.salida || "";
         window.reporteErrores = data.errores || "";
         window.reporteSimbolos = data.simbolos || "";
     })
-    .catch(error => {
-        escribirConsola("Error de conexión con el backend");
-        console.error(error);
-    });
 }
 
 /* Números de línea  */

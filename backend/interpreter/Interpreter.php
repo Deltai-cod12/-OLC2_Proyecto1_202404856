@@ -21,39 +21,73 @@ class Interpreter extends GolampiBaseVisitor {
         $this->output .= $text . "\n";
     }
 
-    private function semanticError($message) {
-        $this->errorReport->add($message);
+    private function semanticError($message, $ctx = null) {
+
+        $line = 0;
+        $column = 0;
+
+        if ($ctx != null && $ctx->start != null) {
+            $line = $ctx->start->getLine();
+            $column = $ctx->start->getCharPositionInLine();
+        }
+
+        $this->errorReport->add("Semántico", $message, $line, $column);
     }
 
-    // =============================
-    // BLOQUES (Scope léxico)
-    // =============================
 
+    // ==================================================
+    // PROGRAMA
+    // ==================================================
+    public function visitProgram($ctx) {
+        return $this->visitChildren($ctx);
+    }
+
+    // ==================================================
+    // FUNCIONES
+    // Ejecuta solo main
+    // ==================================================
+    public function visitFunctionDecl($ctx) {
+
+        $name = $ctx->IDENTIFIER()->getText();
+
+        // Ejecutar solo main
+        if ($name === "main") {
+            $this->visit($ctx->block());
+        }
+
+        return null;
+    }
+
+    // ==================================================
+    // BLOQUES (scope léxico)
+    // ==================================================
     public function visitBlock($ctx) {
 
         $previous = $this->env;
         $this->env = new Environment($previous);
 
-        $this->visitChildren($ctx);
+        foreach ($ctx->statement() as $stmt) {
+            $this->visit($stmt);
+        }
 
         $this->env = $previous;
-
         return null;
     }
 
-    // =============================
+    // ==================================================
+    // STATEMENT
+    // ==================================================
+    public function visitStatement($ctx) {
+        return $this->visitChildren($ctx);
+    }
+
+    public function visitStatementCore($ctx) {
+        return $this->visitChildren($ctx);
+    }
+
+    // ==================================================
     // PRINT
-    // =============================
-
-    public function visitPrintStmt($ctx) {
-        if ($ctx->STRING()) {
-            $text = trim($ctx->STRING()->getText(), '"');
-            $this->println($text);
-        }
-        return null;
-    }
-
-    // fmt.Println(...)
+    // ==================================================
     public function visitFunctionCall($ctx) {
 
         $name = $ctx->functionName()->getText();
@@ -63,9 +97,7 @@ class Interpreter extends GolampiBaseVisitor {
             $values = [];
 
             if ($ctx->args()) {
-                $expList = $ctx->args()->expList();
-
-                foreach ($expList->expression() as $exp) {
+                foreach ($ctx->args()->expList()->expression() as $exp) {
                     $values[] = $this->visit($exp);
                 }
             }
@@ -76,11 +108,11 @@ class Interpreter extends GolampiBaseVisitor {
         return null;
     }
 
-    // =============================
+    // ==================================================
     // VARIABLES
-    // =============================
+    // ==================================================
 
-    // var x int = 10
+    // var x = 10
     public function visitVarDecl($ctx) {
 
         $ids = $ctx->idList()->IDENTIFIER();
@@ -96,11 +128,7 @@ class Interpreter extends GolampiBaseVisitor {
             $name = $ids[$i]->getText();
             $value = $values[$i] ?? null;
 
-            try {
-                $this->env->define($name, $value);
-            } catch (Exception $e) {
-                $this->semanticError($e->getMessage());
-            }
+            $this->env->define($name, $value);
         }
 
         return null;
@@ -117,11 +145,7 @@ class Interpreter extends GolampiBaseVisitor {
         }
 
         for ($i = 0; $i < count($ids); $i++) {
-            try {
-                $this->env->define($ids[$i]->getText(), $values[$i]);
-            } catch (Exception $e) {
-                $this->semanticError($e->getMessage());
-            }
+            $this->env->define($ids[$i]->getText(), $values[$i]);
         }
 
         return null;
@@ -141,20 +165,19 @@ class Interpreter extends GolampiBaseVisitor {
             try {
                 $this->env->assign($ids[$i]->getText(), $values[$i]);
             } catch (Exception $e) {
-                $this->semanticError($e->getMessage());
+                $this->semanticError($e->getMessage(), $ctx);
             }
         }
 
         return null;
     }
 
-    // =============================
+    // ==================================================
     // EXPRESIONES
-    // =============================
-
+    // ==================================================
     public function visitPrimary($ctx) {
 
-        // Número
+        // Entero
         if ($ctx->INT_LITERAL()) {
             return intval($ctx->INT_LITERAL()->getText());
         }
@@ -164,18 +187,20 @@ class Interpreter extends GolampiBaseVisitor {
             return trim($ctx->STRING()->getText(), '"');
         }
 
-        // Variable
+        // true / false
+        if ($ctx->TRUE()) return true;
+        if ($ctx->FALSE()) return false;
+
+        // Identificador
         if ($ctx->IDENTIFIER()) {
             $name = $ctx->IDENTIFIER()->getText();
 
             try {
                 return $this->env->get($name);
             } catch (Exception $e) {
-                error_log("Capturado en Interpreter: " . $e->getMessage());
-                $this->errorReport->add($e->getMessage());
+                    $this->semanticError($e->getMessage(), $ctx);
                 return null;
             }
-
         }
 
         return $this->visitChildren($ctx);

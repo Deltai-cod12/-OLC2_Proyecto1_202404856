@@ -9,12 +9,17 @@ class Environment {
         $this->parent = $parent;
     }
 
-    // Declarar variable
+    // Declarar variable (scope actual)
     public function define($name, $value) {
+
+        if (array_key_exists($name, $this->values)) {
+            throw new Exception("Variable '$name' ya declarada en este ámbito");
+        }
+
         $this->values[$name] = $value;
     }
 
-    // Asignar (busca en scopes superiores)
+    // Asignar variable (busca en scopes)
     public function assign($name, $value) {
 
         if (array_key_exists($name, $this->values)) {
@@ -27,7 +32,7 @@ class Environment {
             return;
         }
 
-        // En esta versión estable no lanzamos error
+        throw new Exception("Variable '$name' no definida");
     }
 
     // Obtener valor
@@ -44,6 +49,7 @@ class Environment {
         throw new Exception("Variable '$name' no definida");
     }
 
+    // Reporte
     public function getAll() {
         return $this->values;
     }
