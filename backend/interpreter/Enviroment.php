@@ -3,26 +3,50 @@
 class Environment {
 
     private $values = [];
+    private $constants = [];
     private $parent;
 
     public function __construct($parent = null) {
         $this->parent = $parent;
     }
 
-    // Declarar variable (scope actual)
+    // =============================
+    // DEFINIR VARIABLE
+    // =============================
     public function define($name, $value) {
 
         if (array_key_exists($name, $this->values)) {
-            throw new Exception("Variable '$name' ya declarada en este ámbito");
+            throw new Exception("Variable '$name' ya definida en este ámbito");
         }
 
         $this->values[$name] = $value;
+        $this->constants[$name] = false;
     }
 
-    // Asignar variable (busca en scopes)
+    // =============================
+    // DEFINIR CONSTANTE
+    // =============================
+    public function defineConst($name, $value) {
+
+        if (array_key_exists($name, $this->values)) {
+            throw new Exception("Identificador '$name' ya definido en este ámbito");
+        }
+
+        $this->values[$name] = $value;
+        $this->constants[$name] = true;
+    }
+
+    // =============================
+    // ASIGNAR
+    // =============================
     public function assign($name, $value) {
 
         if (array_key_exists($name, $this->values)) {
+
+            if ($this->constants[$name]) {
+                throw new Exception("No se puede modificar la constante '$name'");
+            }
+
             $this->values[$name] = $value;
             return;
         }
@@ -35,7 +59,9 @@ class Environment {
         throw new Exception("Variable '$name' no definida");
     }
 
-    // Obtener valor
+    // =============================
+    // OBTENER
+    // =============================
     public function get($name) {
 
         if (array_key_exists($name, $this->values)) {
@@ -49,7 +75,6 @@ class Environment {
         throw new Exception("Variable '$name' no definida");
     }
 
-    // Reporte
     public function getAll() {
         return $this->values;
     }

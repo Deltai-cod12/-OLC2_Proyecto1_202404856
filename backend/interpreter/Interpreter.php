@@ -152,20 +152,68 @@ class Interpreter extends GolampiBaseVisitor {
     }
 
     // x = 20
+    // =============================
+// ASIGNACIONES
+// =============================
     public function visitAssignment($ctx) {
 
-        $ids = $ctx->idList()->IDENTIFIER();
-        $values = [];
+        // Operador (=, +=, -=, *=, /=)
+        $op = $ctx->assignOp()->getText();
 
+        // Identificadores (por ahora solo idList)
+        $ids = $ctx->assignTarget()->idList()->IDENTIFIER();
+
+        // Valores del lado derecho
+        $values = [];
         foreach ($ctx->expList()->expression() as $exp) {
             $values[] = $this->visit($exp);
         }
 
         for ($i = 0; $i < count($ids); $i++) {
+
+            $name = $ids[$i]->getText();
+            $value = $values[$i] ?? null;
+
             try {
-                $this->env->assign($ids[$i]->getText(), $values[$i]);
+                // Valor actual
+                $current = $this->env->get($name);
+
+                // =====================
+                // OPERACIONES COMPUESTAS
+                // =====================
+                switch ($op) {
+
+                    case "=":
+                        $newValue = $value;
+                        break;
+
+                    case "+=":
+                        $newValue = $current + $value;
+                        break;
+
+                    case "-=":
+                        $newValue = $current - $value;
+                        break;
+
+                    case "*=":
+                        $newValue = $current * $value;
+                        break;
+
+                    case "/=":
+                        if ($value == 0) {
+                            throw new Exception("División por cero en '$name'");
+                        }
+                        $newValue = $current / $value;
+                        break;
+
+                    default:
+                        $newValue = $value;
+                }
+
+                $this->env->assign($name, $newValue);
+
             } catch (Exception $e) {
-                $this->semanticError($e->getMessage(), $ctx);
+                $this->semanticError($e->getMessage());
             }
         }
 
@@ -205,4 +253,24 @@ class Interpreter extends GolampiBaseVisitor {
 
         return $this->visitChildren($ctx);
     }
+
+    // =============================
+    // CONSTANTES
+    // =============================
+    public function visitConstDecl($ctx) {
+
+        $name = $ctx->IDENTIFIER()->getText();
+
+        // Evaluar expresión (obligatoria)
+        $value = $this->visit($ctx->expression());
+
+        try {
+            $this->env->defineConst($name, $value);
+        } catch (Exception $e) {
+            $this->semanticError($e->getMessage());
+        }
+
+        return null;
+    }
+
 }
