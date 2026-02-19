@@ -113,7 +113,48 @@ function descargarErrores() {
 }
 
 function descargarSimbolos() {
-    descargarTexto("tabla_simbolos.txt", window.reporteSimbolos || "");
+
+    const simbolos = window.reporteSimbolos || [];
+
+    if (simbolos.length === 0) {
+        descargarTexto("tabla_simbolos.txt", "No hay símbolos registrados.");
+        return;
+    }
+
+    let contenido = "";
+    contenido += "===== TABLA DE SÍMBOLOS =====\n\n";
+
+    // Encabezado
+    contenido +=
+        "Identificador\tTipo\tÁmbito\tValor\tLínea\tColumna\n";
+    contenido +=
+        "-------------------------------------------------------------\n";
+
+    simbolos.forEach(simbolo => {
+        contenido +=
+            (simbolo.identificador || "") + "\t" +
+            (simbolo.tipo || "") + "\t" +
+            (simbolo.ambito || "") + "\t" +
+            (simbolo.valor ?? "") + "\t" +
+            (simbolo.linea || "") + "\t" +
+            (simbolo.columna || "") + "\n";
+    });
+
+    descargarTexto("tabla_simbolos.txt", contenido);
 }
+
+function descargarTexto(nombre, contenido) {
+    const blob = new Blob([contenido], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = nombre;
+    a.click();
+
+    URL.revokeObjectURL(url);
+}
+
+
 
 window.onload = actualizarLineas;

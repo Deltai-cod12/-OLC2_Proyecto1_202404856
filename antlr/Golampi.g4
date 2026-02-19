@@ -51,7 +51,6 @@ statementCore
 | expression
 ;
 
-
 /* ---- Variables ---- */
 
 varDecl
@@ -108,6 +107,7 @@ baseType
 | FLOAT_TYPE
 | BOOL_TYPE
 | STRING_TYPE
+| RUNE_TYPE
 ;
 
 pointerType
@@ -210,6 +210,7 @@ primary
 | INT_LITERAL
 | FLOAT_LITERAL
 | STRING
+| RUNE_LITERAL
 | TRUE
 | FALSE
 | NIL
@@ -300,10 +301,11 @@ BREAK    : 'break';
 CONTINUE : 'continue';
 RETURN   : 'return';
 
-INT_TYPE    : 'int';
-FLOAT_TYPE  : 'float';
+INT_TYPE    : 'int' ('32')?;
+FLOAT_TYPE  : 'float' ('32')?;
 BOOL_TYPE   : 'bool';
 STRING_TYPE : 'string';
+RUNE_TYPE   : 'rune';
 
 TRUE  : 'true';
 FALSE : 'false';
@@ -351,20 +353,20 @@ MOD : '%';
 AMP : '&';
 
 /* ---- Literales ---- */
-
 STRING : '"' (~["\r\n])* '"';
 FLOAT_LITERAL : [0-9]+ '.' [0-9]+;
 INT_LITERAL : [0-9]+;
+RUNE_LITERAL : '\'' ( ~['\r\n\\] | '\\u' [0-9a-fA-F]{4} ) '\'';
 
 /* ---- Identificadores ---- */
-
 IDENTIFIER : [a-zA-Z_] [a-zA-Z0-9_]*;
 
 /* ---- Comentarios ---- */
-
 LINE_COMMENT : '//' ~[\r\n]* -> skip;
 BLOCK_COMMENT : '/*' .*? '*/' -> skip;
 
 /* ---- Espacios ---- */
-
 WS : [ \t\r\n]+ -> skip;
+
+/* ---- Token de error (cualquier carácter no reconocido) ---- */
+ERROR_CHAR : . ;

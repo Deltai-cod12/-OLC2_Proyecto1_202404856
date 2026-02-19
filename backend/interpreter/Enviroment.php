@@ -1,53 +1,87 @@
 <?php
 
+require_once __DIR__ . '/Symbol.php';
+
 class Environment {
 
-    private $values = [];
-    private $constants = [];
+    private $symbols = [];
     private $parent;
+    private $scopeLevel;
 
     public function __construct($parent = null) {
         $this->parent = $parent;
+        $this->scopeLevel = ($parent == null) ? 0 : $parent->scopeLevel + 1;
     }
 
-    // =============================
+    
     // DEFINIR VARIABLE
-    // =============================
-    public function define($name, $value) {
+    public function define($name, $dataType, $value = null, $line = 0, $column = 0) {
 
-        if (array_key_exists($name, $this->values)) {
+        if (array_key_exists($name, $this->symbols)) {
             throw new Exception("Variable '$name' ya definida en este ámbito");
         }
 
-        $this->values[$name] = $value;
-        $this->constants[$name] = false;
+        // Valor por defecto según tipo
+        if ($value === null) {
+            $value = $this->getDefaultValue($dataType);
+        }
+
+        // Verificar compatibilidad
+        if (!$this->checkType($dataType, $value)) {
+            throw new Exception("Tipo incompatible para '$name'");
+        }
+
+        $this->symbols[$name] = new Symbol(
+            $name,
+            $dataType,              // tipo real (int, float, etc)
+            $value,
+            $this->scopeLevel,
+            $line,
+            $column,
+            false                   // no constante
+        );
     }
 
-    // =============================
     // DEFINIR CONSTANTE
-    // =============================
-    public function defineConst($name, $value) {
+    public function defineConst($name, $dataType, $value, $line = 0, $column = 0) {
 
-        if (array_key_exists($name, $this->values)) {
+        if (array_key_exists($name, $this->symbols)) {
             throw new Exception("Identificador '$name' ya definido en este ámbito");
         }
 
-        $this->values[$name] = $value;
-        $this->constants[$name] = true;
+        if (!$this->checkType($dataType, $value)) {
+            throw new Exception("Tipo incompatible para constante '$name'");
+        }
+
+        $this->symbols[$name] = new Symbol(
+            $name,
+            $dataType,
+            $value,
+            $this->scopeLevel,
+            $line,
+            $column,
+            true
+        );
     }
 
-    // =============================
+    
     // ASIGNAR
-    // =============================
     public function assign($name, $value) {
 
-        if (array_key_exists($name, $this->values)) {
+        if (array_key_exists($name, $this->symbols)) {
 
-            if ($this->constants[$name]) {
+            $symbol = $this->symbols[$name];
+
+            if ($symbol->isConst) {
                 throw new Exception("No se puede modificar la constante '$name'");
             }
 
-            $this->values[$name] = $value;
+            // Validar tipo
+            if (!$this->checkType($symbol->type, $value)) {
+                throw new Exception("Tipo incompatible en asignación a '$name'");
+            }
+
+            $symbol->value = $value;
             return;
         }
 
@@ -59,13 +93,12 @@ class Environment {
         throw new Exception("Variable '$name' no definida");
     }
 
-    // =============================
+    
     // OBTENER
-    // =============================
     public function get($name) {
 
-        if (array_key_exists($name, $this->values)) {
-            return $this->values[$name];
+        if (array_key_exists($name, $this->symbols)) {
+            return $this->symbols[$name]->value;
         }
 
         if ($this->parent != null) {
@@ -75,7 +108,93 @@ class Environment {
         throw new Exception("Variable '$name' no definida");
     }
 
+    
+    // VALORES POR DEFECTO
+    private function getDefaultValue($type) {
+
+        switch ($type) {
+            case "int":
+            case "int32":
+            case "rune":
+                return 0;
+
+            case "float":
+            case "float32":
+                return 0.0;
+
+            case "bool":
+                return false;
+
+            case "string":
+                return "";
+
+            default:
+                return null;
+        }
+    }
+
+    
+    // VERIFICACIÓN DE TIPOS
+    private function checkType($type, $value) {
+
+        switch ($type) {
+
+            case "int":
+            case "int32":
+            case "rune":
+                return is_int($value);
+
+            case "float":
+            case "float32":
+                return is_float($value) || is_int($value);
+
+            case "bool":
+                return is_bool($value);
+
+            case "string":
+                return is_string($value);
+
+            default:
+                return true;
+        }
+    }
+
+    
+    // TABLA DE SÍMBOLOS (REPORTE)
     public function getAll() {
-        return $this->values;
+
+        $result = [];
+
+        foreach ($this->symbols as $symbol) {
+            $result[] = [
+                "id" => $symbol->id,
+                "tipo" => $symbol->type,      // ahora es tipo real
+                "ambito" => $symbol->scope,
+                "valor" => $symbol->value,
+                "linea" => $symbol->line,
+                "columna" => $symbol->column
+            ];
+        }
+
+        if ($this->parent != null) {
+            $result = array_merge($this->parent->getAll(), $result);
+        }
+
+        return $result;
+    }
+
+    
+    // OBTENER TIPO (para el Interpreter)
+    public function getType($name) {
+
+        if (array_key_exists($name, $this->symbols)) {
+            return $this->symbols[$name]->type;
+        }
+
+        if ($this->parent != null) {
+            return $this->parent->getType($name);
+        }
+
+        throw new Exception("Variable '$name' no definida");
     }
 }

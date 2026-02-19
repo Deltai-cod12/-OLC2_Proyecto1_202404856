@@ -22,61 +22,65 @@ class Interpreter extends GolampiBaseVisitor {
     }
 
     private function semanticError($message, $ctx = null) {
-
         $line = 0;
         $column = 0;
-
         if ($ctx != null && $ctx->start != null) {
             $line = $ctx->start->getLine();
             $column = $ctx->start->getCharPositionInLine();
         }
-
         $this->errorReport->add("Semántico", $message, $line, $column);
     }
 
+    // INFERENCIA DE TIPO
+    private function inferType($value) {
+        if (is_int($value)) return "int";
+        if (is_float($value)) return "float";
+        if (is_bool($value)) return "bool";
+        if (is_string($value)) return (mb_strlen($value) === 1) ? "rune" : "string";
+        if ($value === null) return "nil";
+        return "int";
+    }
 
-    // ==================================================
+    private function getTypeFromCtx($typeCtx) {
+        if ($typeCtx == null) return null;
+        $text = $typeCtx->getText();
+        switch ($text) {
+            case "int": case "int32": return "int";
+            case "float": case "float32": return "float";
+            case "bool": return "bool";
+            case "string": return "string";
+            case "rune": return "rune";
+            default: return "int";
+        }
+    }
+
     // PROGRAMA
-    // ==================================================
     public function visitProgram($ctx) {
         return $this->visitChildren($ctx);
     }
 
-    // ==================================================
     // FUNCIONES
     // Ejecuta solo main
-    // ==================================================
     public function visitFunctionDecl($ctx) {
-
         $name = $ctx->IDENTIFIER()->getText();
-
-        // Ejecutar solo main
         if ($name === "main") {
             $this->visit($ctx->block());
         }
-
         return null;
     }
 
-    // ==================================================
-    // BLOQUES (scope léxico)
-    // ==================================================
+    // BLOQUES
     public function visitBlock($ctx) {
-
         $previous = $this->env;
         $this->env = new Environment($previous);
-
         foreach ($ctx->statement() as $stmt) {
             $this->visit($stmt);
         }
-
         $this->env = $previous;
         return null;
     }
 
-    // ==================================================
-    // STATEMENT
-    // ==================================================
+    // STATEMENTS
     public function visitStatement($ctx) {
         return $this->visitChildren($ctx);
     }
@@ -85,192 +89,345 @@ class Interpreter extends GolampiBaseVisitor {
         return $this->visitChildren($ctx);
     }
 
-    // ==================================================
-    // PRINT
-    // ==================================================
+    // FUNCIONES BUILT-IN
     public function visitFunctionCall($ctx) {
-
         $name = $ctx->functionName()->getText();
-
         if ($name === "fmt.Println") {
-
             $values = [];
-
             if ($ctx->args()) {
                 foreach ($ctx->args()->expList()->expression() as $exp) {
                     $values[] = $this->visit($exp);
                 }
             }
-
             $this->println(implode(" ", $values));
         }
-
         return null;
     }
 
-    // ==================================================
     // VARIABLES
-    // ==================================================
-
-    // var x = 10
     public function visitVarDecl($ctx) {
-
         $ids = $ctx->idList()->IDENTIFIER();
-        $values = [];
+        $dataType = $this->getTypeFromCtx($ctx->type());
 
+        $values = [];
         if ($ctx->expList()) {
             foreach ($ctx->expList()->expression() as $exp) {
-                $values[] = $this->visit($exp);
+                $values[] = $exp; // guardar la expresión, no evaluarla aún
             }
         }
 
+        //declarar variables con valor por defecto
         for ($i = 0; $i < count($ids); $i++) {
+            $token = $ids[$i]->getSymbol();
             $name = $ids[$i]->getText();
-            $value = $values[$i] ?? null;
+            $line = $token->getLine();
+            $column = $token->getCharPositionInLine();
 
-            $this->env->define($name, $value);
+            try {
+                // definir sin valor → usa default del tipo
+                $this->env->define($name, $dataType, null, $line, $column);
+            } catch (Exception $e) {
+                $this->semanticError($e->getMessage(), $ctx);
+            }
+        }
+
+        //evaluar y asignar valores
+        for ($i = 0; $i < count($values); $i++) {
+            $name = $ids[$i]->getText();
+
+            try {
+                $value = $this->visit($values[$i]);
+                $this->env->assign($name, $value);
+            } catch (Exception $e) {
+                $this->semanticError($e->getMessage(), $ctx);
+            }
         }
 
         return null;
     }
 
-    // x := 10
-    public function visitShortVarDecl($ctx) {
 
+    public function visitShortVarDecl($ctx) {
         $ids = $ctx->idList()->IDENTIFIER();
         $values = [];
-
         foreach ($ctx->expList()->expression() as $exp) {
             $values[] = $this->visit($exp);
         }
-
         for ($i = 0; $i < count($ids); $i++) {
-            $this->env->define($ids[$i]->getText(), $values[$i]);
+            $token = $ids[$i]->getSymbol();
+            $name = $ids[$i]->getText();
+            $value = $values[$i] ?? null;
+            $line = $token->getLine();
+            $column = $token->getCharPositionInLine();
+            $dataType = $this->inferType($value);
+            try {
+                $this->env->define($name, $dataType, $value, $line, $column);
+            } catch (Exception $e) {
+                $this->semanticError($e->getMessage(), $ctx);
+            }
         }
-
         return null;
     }
 
-    // x = 20
-    // =============================
-// ASIGNACIONES
-// =============================
+    // ASIGNACIONES
     public function visitAssignment($ctx) {
-
-        // Operador (=, +=, -=, *=, /=)
         $op = $ctx->assignOp()->getText();
-
-        // Identificadores (por ahora solo idList)
         $ids = $ctx->assignTarget()->idList()->IDENTIFIER();
-
-        // Valores del lado derecho
         $values = [];
         foreach ($ctx->expList()->expression() as $exp) {
             $values[] = $this->visit($exp);
         }
-
         for ($i = 0; $i < count($ids); $i++) {
-
             $name = $ids[$i]->getText();
             $value = $values[$i] ?? null;
-
             try {
-                // Valor actual
                 $current = $this->env->get($name);
-
-                // =====================
-                // OPERACIONES COMPUESTAS
-                // =====================
                 switch ($op) {
-
-                    case "=":
-                        $newValue = $value;
-                        break;
-
-                    case "+=":
-                        $newValue = $current + $value;
-                        break;
-
-                    case "-=":
-                        $newValue = $current - $value;
-                        break;
-
-                    case "*=":
-                        $newValue = $current * $value;
-                        break;
-
-                    case "/=":
-                        if ($value == 0) {
-                            throw new Exception("División por cero en '$name'");
-                        }
-                        $newValue = $current / $value;
-                        break;
-
-                    default:
-                        $newValue = $value;
+                    case "=": $newValue = $value; break;
+                    case "+=": $newValue = $this->safeAdd($current, $value); break;
+                    case "-=": $newValue = $this->safeSub($current, $value); break;
+                    case "*=": $newValue = $this->safeMul($current, $value); break;
+                    case "/=": $newValue = $this->safeDiv($current, $value, $name); break;
+                    default: $newValue = $value;
                 }
-
                 $this->env->assign($name, $newValue);
-
             } catch (Exception $e) {
-                $this->semanticError($e->getMessage());
+                $this->semanticError($e->getMessage(), $ctx);
             }
         }
-
         return null;
     }
 
-    // ==================================================
-    // EXPRESIONES
-    // ==================================================
-    public function visitPrimary($ctx) {
-
-        // Entero
-        if ($ctx->INT_LITERAL()) {
-            return intval($ctx->INT_LITERAL()->getText());
+    // CONSTANTES
+    public function visitConstDecl($ctx) {
+        $token = $ctx->IDENTIFIER()->getSymbol();
+        $name = $ctx->IDENTIFIER()->getText();
+        $dataType = $this->getTypeFromCtx($ctx->type());
+        $value = $this->visit($ctx->expression());
+        $line = $token->getLine();
+        $column = $token->getCharPositionInLine();
+        try {
+            $this->env->defineConst($name, $dataType, $value, $line, $column);
+        } catch (Exception $e) {
+            $this->semanticError($e->getMessage(), $ctx);
         }
+        return null;
+    }
 
-        // String
-        if ($ctx->STRING()) {
-            return trim($ctx->STRING()->getText(), '"');
+    // EXPRESIONES ARITMÉTICAS Y LÓGICAS
+    public function visitExpression($ctx) { return $this->visit($ctx->logicalOrExp()); }
+    public function visitLogicalOrExp($ctx) {
+        $left = $this->visit($ctx->logicalAndExp(0));
+        for ($i = 1; $i < count($ctx->logicalAndExp()); $i++) {
+            $right = $this->visit($ctx->logicalAndExp($i));
+            $left = $left || $right;
         }
-
-        // true / false
-        if ($ctx->TRUE()) return true;
-        if ($ctx->FALSE()) return false;
-
-        // Identificador
-        if ($ctx->IDENTIFIER()) {
-            $name = $ctx->IDENTIFIER()->getText();
-
-            try {
-                return $this->env->get($name);
-            } catch (Exception $e) {
-                    $this->semanticError($e->getMessage(), $ctx);
-                return null;
+        return $left;
+    }
+    public function visitLogicalAndExp($ctx) {
+        $left = $this->visit($ctx->equalityExp(0));
+        for ($i = 1; $i < count($ctx->equalityExp()); $i++) {
+            $right = $this->visit($ctx->equalityExp($i));
+            $left = $left && $right;
+        }
+        return $left;
+    }
+    public function visitEqualityExp($ctx) {
+        $left = $this->visit($ctx->relationalExp(0));
+        for ($i = 1; $i < count($ctx->relationalExp()); $i++) {
+            $op = $ctx->getChild(2*$i-1)->getText();
+            $right = $this->visit($ctx->relationalExp($i));
+            if ($op === "==") $left = ($left == $right);
+            else if ($op === "!=") $left = ($left != $right);
+        }
+        return $left;
+    }
+    public function visitRelationalExp($ctx) {
+        $left = $this->visit($ctx->additiveExp(0));
+        for ($i = 1; $i < count($ctx->additiveExp()); $i++) {
+            $op = $ctx->getChild(2*$i-1)->getText();
+            $right = $this->visit($ctx->additiveExp($i));
+            switch ($op) {
+                case "<": $left = ($left < $right); break;
+                case "<=": $left = ($left <= $right); break;
+                case ">": $left = ($left > $right); break;
+                case ">=": $left = ($left >= $right); break;
             }
         }
-
+        return $left;
+    }
+    public function visitAdditiveExp($ctx) {
+        $left = $this->visit($ctx->multiplicativeExp(0));
+        for ($i = 1; $i < count($ctx->multiplicativeExp()); $i++) {
+            $op = $ctx->getChild(2*$i-1)->getText();
+            $right = $this->visit($ctx->multiplicativeExp($i));
+            if ($op === "+") $left = $this->safeAdd($left, $right);
+            else if ($op === "-") $left = $this->safeSub($left, $right);
+        }
+        return $left;
+    }
+    public function visitMultiplicativeExp($ctx) {
+        $left = $this->visit($ctx->unaryExp(0));
+        for ($i = 1; $i < count($ctx->unaryExp()); $i++) {
+            $op = $ctx->getChild(2*$i-1)->getText();
+            $right = $this->visit($ctx->unaryExp($i));
+            switch ($op) {
+                case "*": $left = $this->safeMul($left, $right); break;
+                case "/": $left = $this->safeDiv($left, $right, ""); break;
+                case "%": $left = $this->safeMod($left, $right, ""); break;
+            }
+        }
+        return $left;
+    }
+    public function visitUnaryExp($ctx) {
+        if ($ctx->primary()) return $this->visit($ctx->primary());
+        if ($ctx->MINUS()) return -$this->visit($ctx->unaryExp());
+        if ($ctx->NOT()) return !$this->visit($ctx->unaryExp());
         return $this->visitChildren($ctx);
     }
 
-    // =============================
-    // CONSTANTES
-    // =============================
-    public function visitConstDecl($ctx) {
+    public function visitPrimary($ctx) {
 
-        $name = $ctx->IDENTIFIER()->getText();
+    if ($ctx->LPAREN()) {
+        return $this->visit($ctx->expression());
+    }
+        if ($ctx->INT_LITERAL()) return intval($ctx->INT_LITERAL()->getText());
+        if ($ctx->FLOAT_LITERAL()) return floatval($ctx->FLOAT_LITERAL()->getText());
+        if ($ctx->STRING()) return trim($ctx->STRING()->getText(), '"');
+        if ($ctx->RUNE_LITERAL()) {
+            $text = $ctx->RUNE_LITERAL()->getText();
+            $char = substr($text, 1, -1);
+            if (str_starts_with($char, '\u')) return intval(hexdec(substr($char, 2)));
+            return mb_ord($char, 'UTF-8');
+        }
+        if ($ctx->TRUE()) return true;
+        if ($ctx->FALSE()) return false;
+        if ($ctx->IDENTIFIER()) {
+            $name = $ctx->IDENTIFIER()->getText();
+            try { return $this->env->get($name); } 
+            catch (Exception $e) { $this->semanticError($e->getMessage(), $ctx); return null; }
+        }
+        return $this->visitChildren($ctx);
+    }
 
-        // Evaluar expresión (obligatoria)
-        $value = $this->visit($ctx->expression());
+    // OPERACIONES SEGURAS
 
-        try {
-            $this->env->defineConst($name, $value);
-        } catch (Exception $e) {
-            $this->semanticError($e->getMessage());
+    // SUMA
+    private function safeAdd($left, $right) {
+
+        $typeL = $this->inferType($left);
+        $typeR = $this->inferType($right);
+
+        // int + rune
+        if (($typeL === "int" || $typeL === "rune") &&
+            ($typeR === "int" || $typeR === "rune")) {
+            return intval($left) + intval($right);
         }
 
+        // numéricos (promoción a float)
+        if (in_array($typeL, ["int","float","rune"]) &&
+            in_array($typeR, ["int","float","rune"])) {
+            return floatval($left) + floatval($right);
+        }
+
+        // string + string
+        if ($typeL === "string" && $typeR === "string") {
+            return strval($left) . strval($right);
+        }
+
+        // ERROR (faltaba esto)
+        $this->semanticError("Tipos incompatibles en suma");
+        return 0;
+    }
+
+
+    // RESTA
+    private function safeSub($left, $right) {
+        $typeL = $this->inferType($left);
+        $typeR = $this->inferType($right);
+
+        if (in_array($typeL, ["int","float","rune"]) &&
+            in_array($typeR, ["int","float","rune"])) {
+
+            if ($typeL === "float" || $typeR === "float") {
+                return floatval($left) - floatval($right);
+            }
+
+            return intval($left) - intval($right);
+        }
+
+        $this->semanticError("Tipos incompatibles en resta");
         return null;
+    }
+
+    // MULTIPLICACIÓN
+    private function safeMul($a, $b) {
+
+    if ($a === null || $b === null) {
+        $this->semanticError("Operación con valor null en multiplicación");
+        return 0;
+    }
+
+        // string * int
+        if (is_string($a) && is_int($b)) {
+            return str_repeat($a, $b);
+        }
+        if (is_string($b) && is_int($a)) {
+            return str_repeat($b, $a);
+        }
+
+        // numéricos (int, float, rune)
+        if (is_numeric($a) && is_numeric($b)) {
+
+            // promoción a float
+            if (is_float($a) || is_float($b)) {
+                return floatval($a) * floatval($b);
+            }
+
+            // ambos enteros
+            return intval($a) * intval($b);
+        }
+
+        $this->semanticError("Tipos incompatibles en multiplicación");
+        return 0;
+    }
+
+    // DIVISIÓN
+        private function safeDiv($a, $b, $ctx) {
+
+        if (!is_numeric($a) || !is_numeric($b)) {
+            $this->semanticError("Tipos incompatibles en división");
+            return 0;
+        }
+
+        if ($b == 0) {
+            $this->semanticError("División por cero");
+            return 0;
+        }
+
+        if (is_float($a) || is_float($b)) {
+            return floatval($a) / floatval($b);
+        }
+
+        // división entera
+        return intval($a / $b);
+    }
+
+
+    // MÓDULO
+    private function safeMod($a, $b, $ctx) {
+
+        if (!is_numeric($a) || !is_numeric($b) || is_float($a) || is_float($b)) {
+            $this->semanticError("Tipos incompatibles en módulo");
+            return 0;
+        }
+
+        if ($b == 0) {
+            $this->semanticError("Módulo por cero");
+            return 0;
+        }
+
+        return intval($a) % intval($b);
     }
 
 }

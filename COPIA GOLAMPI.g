@@ -395,3 +395,8 @@ BLOCK_COMMENT
 WS
 : [ \t\r\n]+ -> skip
 ;
+
+
+
+
+Funcionamiento de los demas tipos de variables, revisar lo puesto en el .txt

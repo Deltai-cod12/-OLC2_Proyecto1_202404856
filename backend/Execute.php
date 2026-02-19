@@ -35,28 +35,56 @@ use Antlr\Antlr4\Runtime\CommonTokenStream;
 use generated\GolampiLexer;
 use generated\GolampiParser;
 
-// ======================
 // LEER INPUT
-// ======================
 
 $input = file_get_contents("php://input");
 $data = json_decode($input, true);
 $codigo = $data["codigo"] ?? "";
 
-// ======================
 // ERROR REPORT (Singleton)
-// ======================
 
 $errorReport = ErrorReport::getInstance();
 $errorReport->clear();
+
+// RECOLECCIÓN DE TOKENS
+
+$inputStreamTokens = InputStream::fromString($codigo);
+$lexerTokens = new GolampiLexer($inputStreamTokens);
+
+$vocab = $lexerTokens->getVocabulary();
+$tokens = $lexerTokens->getAllTokens();
+
+$tokenList = [];
+
+foreach ($tokens as $token) {
+    $type = $token->getType();
+    $text = $token->getText();
+    $name = $vocab->getSymbolicName($type);
+    if ($name === null) {
+        $name = $vocab->getLiteralName($type);
+    }
+
+    if ($name === "ERROR_CHAR") {
+        $errorReport->add("Lexico", "Símbolo no esperado: '$text'", $token->getLine(), $token->getCharPositionInLine());
+    }
+
+    $tokenList[] = [
+        "tipo" => $name,
+        "lexema" => $text,
+        "linea" => $token->getLine(),
+        "columna" => $token->getCharPositionInLine()
+    ];
+}
+
+
+
+
 
 // Log del código recibido
 error_log("=== EJECUTANDO CÓDIGO ===");
 error_log($codigo);
 
-// ======================
 // ANTLR PARSER
-// ======================
 
 $inputStream = InputStream::fromString($codigo);
 $lexer = new GolampiLexer($inputStream);
@@ -66,24 +94,29 @@ $parser = new GolampiParser($tokenStream);
 // Regla inicial
 $tree = $parser->program();
 
-// ======================
 // EJECUCIÓN
-// ======================
 
 $environment = new Environment();
 $interpreter = new Interpreter($environment, $errorReport);
 
 $interpreter->visit($tree);
 
-// ======================
 // ERRORES → TERMINAL
-// ======================
 
-$errors = $errorReport->getErrors();
+$errorsRaw = $errorReport->getErrors();
+$errors = [];
 
-if (!empty($errors)) {
+foreach ($errorsRaw as $err) {
+    $errors[] =
+        "[" . $err["type"] . "] " .
+        $err["message"] .
+        " (L:" . $err["line"] .
+        " C:" . $err["column"] . ")";
+}
+
+if (!empty($errorsRaw)) {
     error_log("=== ERRORES DETECTADOS ===");
-    foreach ($errors as $err) {
+    foreach ($errorsRaw as $err) {
         error_log(
             "[" . $err["type"] . "] " .
             $err["message"] .
@@ -93,12 +126,12 @@ if (!empty($errors)) {
     }
 }
 
-// ======================
 // RESPUESTA AL FRONTEND
-// ======================
 
 echo json_encode([
-    "salida" => $interpreter->getOutput(),
-    "errores" => $errors,   // ← ahora es arreglo estructurado
-    "simbolos" => $environment->getAll()
+    "salida"   => $interpreter->getOutput(),
+    "errores"  => implode("\n", $errors),
+    "simbolos" => $environment->getAll(),
+    "tokens"   => $tokenList
 ]);
+
