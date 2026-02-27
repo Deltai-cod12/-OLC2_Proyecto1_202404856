@@ -17,7 +17,13 @@ class Interpreter extends GolampiBaseVisitor {
         return $this->output;
     }
 
+    // fmt.Println
     private function println($text) {
+
+        if (is_bool($text)) {
+            $text = $text ? "true" : "false";
+        }
+
         $this->output .= $text . "\n";
     }
 
@@ -91,16 +97,30 @@ class Interpreter extends GolampiBaseVisitor {
 
     // FUNCIONES BUILT-IN
     public function visitFunctionCall($ctx) {
+
         $name = $ctx->functionName()->getText();
+
         if ($name === "fmt.Println") {
+
             $values = [];
+
             if ($ctx->args()) {
                 foreach ($ctx->args()->expList()->expression() as $exp) {
-                    $values[] = $this->visit($exp);
+
+                    $value = $this->visit($exp);
+
+                    // Convertir correctamente
+                    if (is_bool($value)) {
+                        $value = $value ? "true" : "false";
+                    }
+
+                    $values[] = $value;
                 }
             }
-            $this->println(implode(" ", $values));
+
+            $this->output .= implode(" ", $values) . "\n";
         }
+
         return null;
     }
 
@@ -233,27 +253,32 @@ class Interpreter extends GolampiBaseVisitor {
         return $left;
     }
     public function visitEqualityExp($ctx) {
+
         $left = $this->visit($ctx->relationalExp(0));
+
         for ($i = 1; $i < count($ctx->relationalExp()); $i++) {
+
             $op = $ctx->getChild(2*$i-1)->getText();
             $right = $this->visit($ctx->relationalExp($i));
-            if ($op === "==") $left = ($left == $right);
-            else if ($op === "!=") $left = ($left != $right);
+
+            $left = $this->safeEquality($left, $right, $op);
         }
+
         return $left;
     }
+
     public function visitRelationalExp($ctx) {
+
         $left = $this->visit($ctx->additiveExp(0));
+
         for ($i = 1; $i < count($ctx->additiveExp()); $i++) {
+
             $op = $ctx->getChild(2*$i-1)->getText();
             $right = $this->visit($ctx->additiveExp($i));
-            switch ($op) {
-                case "<": $left = ($left < $right); break;
-                case "<=": $left = ($left <= $right); break;
-                case ">": $left = ($left > $right); break;
-                case ">=": $left = ($left >= $right); break;
-            }
+
+            $left = $this->safeRelational($left, $right, $op);
         }
+
         return $left;
     }
     public function visitAdditiveExp($ctx) {
@@ -428,6 +453,72 @@ class Interpreter extends GolampiBaseVisitor {
         }
 
         return intval($a) % intval($b);
+    }
+
+    // ==
+    private function safeEquality($a, $b, $op) {
+
+        $typeL = $this->inferType($a);
+        $typeR = $this->inferType($b);
+
+        // numéricos (int, float, rune)
+        if (in_array($typeL, ["int","float","rune"]) &&
+            in_array($typeR, ["int","float","rune"])) {
+
+            $a = floatval($a);
+            $b = floatval($b);
+
+            return ($op === "==") ? ($a == $b) : ($a != $b);
+        }
+
+        // bool con bool
+        if ($typeL === "bool" && $typeR === "bool") {
+            return ($op === "==") ? ($a == $b) : ($a != $b);
+        }
+
+        // string con string
+        if ($typeL === "string" && $typeR === "string") {
+            return ($op === "==") ? ($a === $b) : ($a !== $b);
+        }
+
+        $this->semanticError("Tipos incompatibles en comparación de igualdad");
+        return false;
+    }
+
+    // Operaciones Relacionales
+    private function safeRelational($a, $b, $op) {
+
+        $typeL = $this->inferType($a);
+        $typeR = $this->inferType($b);
+
+        // numéricos
+        if (in_array($typeL, ["int","float","rune"]) &&
+            in_array($typeR, ["int","float","rune"])) {
+
+            $a = floatval($a);
+            $b = floatval($b);
+
+            switch ($op) {
+                case ">":  return $a > $b;
+                case ">=": return $a >= $b;
+                case "<":  return $a < $b;
+                case "<=": return $a <= $b;
+            }
+        }
+
+        // string con string
+        if ($typeL === "string" && $typeR === "string") {
+
+            switch ($op) {
+                case ">":  return $a > $b;
+                case ">=": return $a >= $b;
+                case "<":  return $a < $b;
+                case "<=": return $a <= $b;
+            }
+        }
+
+        $this->semanticError("Tipos incompatibles en comparación relacional");
+        return false;
     }
 
 }
