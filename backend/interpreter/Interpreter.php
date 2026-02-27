@@ -236,22 +236,74 @@ class Interpreter extends GolampiBaseVisitor {
 
     // EXPRESIONES ARITMÉTICAS Y LÓGICAS
     public function visitExpression($ctx) { return $this->visit($ctx->logicalOrExp()); }
+
+    // Operador OR
     public function visitLogicalOrExp($ctx) {
-        $left = $this->visit($ctx->logicalAndExp(0));
-        for ($i = 1; $i < count($ctx->logicalAndExp()); $i++) {
-            $right = $this->visit($ctx->logicalAndExp($i));
-            $left = $left || $right;
+
+        $result = $this->visit($ctx->logicalAndExp(0));
+
+        if (count($ctx->logicalAndExp()) > 1) {
+
+            if (!is_bool($result)) {
+                $this->semanticError("Operador || requiere operandos bool", $ctx);
+                return null;
+            }
+
+            for ($i = 1; $i < count($ctx->logicalAndExp()); $i++) {
+
+                if ($result === true) {
+                    return true;
+                }
+
+                $right = $this->visit($ctx->logicalAndExp($i));
+
+                if (!is_bool($right)) {
+                    $this->semanticError("Operador || requiere operandos bool", $ctx);
+                    return null;
+                }
+
+                $result = $result || $right;
+            }
         }
-        return $left;
+
+        return $result;
     }
+
+    // Operacion AND
     public function visitLogicalAndExp($ctx) {
-        $left = $this->visit($ctx->equalityExp(0));
-        for ($i = 1; $i < count($ctx->equalityExp()); $i++) {
-            $right = $this->visit($ctx->equalityExp($i));
-            $left = $left && $right;
+
+        $result = $this->visit($ctx->equalityExp(0));
+
+        // ⚠ SOLO validar si realmente hay operador &&
+        if (count($ctx->equalityExp()) > 1) {
+
+            if (!is_bool($result)) {
+                $this->semanticError("Operador && requiere operandos bool", $ctx);
+                return null;
+            }
+
+            for ($i = 1; $i < count($ctx->equalityExp()); $i++) {
+
+                // Cortocircuito
+                if ($result === false) {
+                    return false;
+                }
+
+                $right = $this->visit($ctx->equalityExp($i));
+
+                if (!is_bool($right)) {
+                    $this->semanticError("Operador && requiere operandos bool", $ctx);
+                    return null;
+                }
+
+                $result = $result && $right;
+            }
         }
-        return $left;
+
+        return $result;
     }
+
+    // ==
     public function visitEqualityExp($ctx) {
 
         $left = $this->visit($ctx->relationalExp(0));
@@ -520,5 +572,56 @@ class Interpreter extends GolampiBaseVisitor {
         $this->semanticError("Tipos incompatibles en comparación relacional");
         return false;
     }
+
+    // Sentencias de Control de flujo
+    // IF
+    public function visitIfStmt($ctx) {
+
+        $previousEnv = $this->env;
+
+        // Crear scope del if
+        $this->env = new Environment($previousEnv);
+
+        // Ejecutar simpleStmt si existe
+        if ($ctx->simpleStmt()) {
+            $this->visit($ctx->simpleStmt());
+        }
+
+        // Evaluar condición
+        $condition = $this->visit($ctx->expression());
+
+        if (!is_bool($condition)) {
+            $this->semanticError("La condición del if debe ser bool", $ctx);
+            $this->env = $previousEnv;
+            return null;
+        }
+
+        // Ejecutar bloque correspondiente
+        if ($condition) {
+
+            // Ejecuta bloque principal
+            $this->visit($ctx->block(0));
+
+        } else {
+
+            if ($ctx->ELSE()) {
+
+                // else if
+                if ($ctx->ifStmt()) {
+                    $this->visit($ctx->ifStmt());
+                }
+                // else normal
+                else if (count($ctx->block()) > 1) {
+                    $this->visit($ctx->block(1));
+                }
+            }
+        }
+
+        // Restaurar entorno (scope del if muere aquí)
+        $this->env = $previousEnv;
+
+        return null;
+    }
+
 
 }
