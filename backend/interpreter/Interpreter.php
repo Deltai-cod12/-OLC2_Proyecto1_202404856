@@ -3,7 +3,7 @@
 use generated\GolampiBaseVisitor;
 
 class Interpreter extends GolampiBaseVisitor {
-
+    private $functions = [];
     private $env;
     private $output = "";
     private $errorReport;
@@ -62,16 +62,82 @@ class Interpreter extends GolampiBaseVisitor {
 
     // PROGRAMA
     public function visitProgram($ctx) {
-        return $this->visitChildren($ctx);
+
+        // Registrar todas las funciones
+        foreach ($ctx->functionDecl() as $func) {
+            $this->visit($func);
+        }
+
+        // Ejecutar main si existe
+        if (isset($this->functions["main"])) {
+            $this->executeFunction("main", []);
+        } else {
+            $this->semanticError("No se encontró la función main");
+        }
+
+        return null;
     }
 
     // FUNCIONES
-    // Ejecuta solo main
-    public function visitFunctionDecl($ctx) {
+public function visitFunctionDecl($ctx) {
+
         $name = $ctx->IDENTIFIER()->getText();
-        if ($name === "main") {
-            $this->visit($ctx->block());
+
+        $params = [];
+
+        // Obtener parámetros si existen
+        if ($ctx->params()) {
+            foreach ($ctx->params()->param() as $param) {
+                $params[] = $param->IDENTIFIER()->getText();
+            }
         }
+
+        // Guardar función
+        $this->functions[$name] = (object)[
+            "params" => $params,
+            "block"  => $ctx->block()
+        ];
+
+        return null;
+    }
+    private function executeFunction($name, $args) {
+
+        if (!isset($this->functions[$name])) {
+            throw new Exception("Función '$name' no definida");
+        }
+
+        $function = $this->functions[$name];
+
+        if (count($args) !== count($function->params)) {
+            throw new Exception("Cantidad incorrecta de argumentos en '$name'");
+        }
+
+        $previousEnv = $this->env;
+        $this->env = new Environment($previousEnv);
+
+        try {
+
+            // Asignar parámetros
+            for ($i = 0; $i < count($args); $i++) {
+                $this->env->define(
+                    $function->params[$i],
+                    $this->inferType($args[$i]),
+                    $args[$i],
+                    0,
+                    0
+                );
+            }
+
+            // Ejecutar cuerpo
+            $this->visit($function->block);
+
+        } catch (ReturnException $e) {
+
+            $this->env = $previousEnv;
+            return $e->value;
+        }
+
+        $this->env = $previousEnv;
         return null;
     }
 
@@ -100,6 +166,9 @@ class Interpreter extends GolampiBaseVisitor {
 
         $name = $ctx->functionName()->getText();
 
+        /* =============================
+        BUILT-IN: fmt.Println
+        ============================== */
         if ($name === "fmt.Println") {
 
             $values = [];
@@ -109,7 +178,6 @@ class Interpreter extends GolampiBaseVisitor {
 
                     $value = $this->visit($exp);
 
-                    // Convertir correctamente
                     if (is_bool($value)) {
                         $value = $value ? "true" : "false";
                     }
@@ -119,9 +187,27 @@ class Interpreter extends GolampiBaseVisitor {
             }
 
             $this->output .= implode(" ", $values) . "\n";
+            return null;
         }
 
-        return null;
+        /* =============================
+        FUNCIONES DEL USUARIO
+        ============================== */
+
+        $args = [];
+
+        if ($ctx->args()) {
+            foreach ($ctx->args()->expList()->expression() as $exp) {
+                $args[] = $this->visit($exp);
+            }
+        }
+
+        try {
+            return $this->executeFunction($name, $args);
+        } catch (Exception $e) {
+            $this->semanticError($e->getMessage(), $ctx);
+            return null;
+        }
     }
 
     // VARIABLES
@@ -728,48 +814,62 @@ class Interpreter extends GolampiBaseVisitor {
 
         $matched = false;
 
-        // Recorrer cada case
-        foreach ($ctx->caseClause() as $caseCtx) {
+        try {
 
-            if ($matched) break;
+            // Recorrer cada case
+            foreach ($ctx->caseClause() as $caseCtx) {
 
-            // Obtener lista de expresiones del case (expList)
-            $expressions = $caseCtx->expList()->expression();
+                if ($matched) break;
 
-            foreach ($expressions as $exp) {
+                $expressions = $caseCtx->expList()->expression();
 
-                $caseValue = $this->visit($exp);
+                foreach ($expressions as $exp) {
 
-                // Validar tipos
-                $typeSwitch = $this->inferType($switchValue);
-                $typeCase   = $this->inferType($caseValue);
+                    $caseValue = $this->visit($exp);
 
-                if ($typeSwitch !== $typeCase) {
-                    $this->semanticError("Tipos incompatibles en case", $caseCtx);
-                    return null;
-                }
+                    // Validar tipos
+                    $typeSwitch = $this->inferType($switchValue);
+                    $typeCase   = $this->inferType($caseValue);
 
-                // Comparación usando tu sistema seguro
-                if ($this->safeEquality($switchValue, $caseValue, "==")) {
-
-                    $matched = true;
-
-                    // Ejecutar statements del case
-                    foreach ($caseCtx->statement() as $stmt) {
-                        $this->visit($stmt);
+                    if ($typeSwitch !== $typeCase) {
+                        $this->semanticError("Tipos incompatibles en case", $caseCtx);
+                        return null;
                     }
 
-                    break;
+                    // Comparación segura
+                    if ($this->safeEquality($switchValue, $caseValue, "==")) {
+
+                        $matched = true;
+
+                        try {
+                            // Ejecutar statements del case
+                            foreach ($caseCtx->statement() as $stmt) {
+                                $this->visit($stmt);
+                            }
+                        } catch (BreakException $e) {
+                            // break termina el switch
+                            break 2; 
+                        }
+
+                        break;
+                    }
                 }
             }
-        }
 
-        // Si ningún case coincidió → ejecutar default
-        if (!$matched && $ctx->defaultClause()) {
+            // Ejecutar default si ningún case coincidió
+            if (!$matched && $ctx->defaultClause()) {
 
-            foreach ($ctx->defaultClause()->statement() as $stmt) {
-                $this->visit($stmt);
+                try {
+                    foreach ($ctx->defaultClause()->statement() as $stmt) {
+                        $this->visit($stmt);
+                    }
+                } catch (BreakException $e) {
+                    // break dentro de default también termina switch
+                }
             }
+
+        } catch (BreakException $e) {
+            // Seguridad adicional (no debería llegar aquí)
         }
 
         return null;
@@ -779,70 +879,155 @@ class Interpreter extends GolampiBaseVisitor {
     public function visitForStmt($ctx) {
 
         $previousEnv = $this->env;
-
-        // El for SI crea scope propio
         $this->env = new Environment($previousEnv);
 
-        // FOR CON forClause
-        if ($ctx->forClause()) {
+        try {
 
-            $clause = $ctx->forClause();
+            /* =========================
+            FOR con forClause
+            for init; cond; post
+            ========================== */
+            if ($ctx->forClause()) {
 
-            // Inicialización
-            $this->visit($clause->simpleStmt(0));
+                $clause = $ctx->forClause();
 
-            while (true) {
-
-                // Condición
-                $condition = $this->visit($clause->expression());
-
-                if (!is_bool($condition)) {
-                    $this->semanticError("La condición del for debe ser bool", $ctx);
-                    break;
+                // Inicialización
+                if ($clause->simpleStmt(0)) {
+                    $this->visit($clause->simpleStmt(0));
                 }
 
-                if (!$condition) break;
+                while (true) {
 
-                // Ejecutar bloque
-                $this->visit($ctx->block());
+                    // Condición
+                    $condition = $this->visit($clause->expression());
 
-                // Incremento / actualización
-                $this->visit($clause->simpleStmt(1));
-            }
-        }
+                    if (!is_bool($condition)) {
+                        $this->semanticError("La condición del for debe ser bool", $ctx);
+                        break;
+                    }
 
-        // FOR tipo while
-        else if ($ctx->expression()) {
+                    if (!$condition) break;
 
-            while (true) {
+                    try {
+                        $this->visit($ctx->block());
+                    } catch (ContinueException $e) {
+                        // Ejecutar post antes de continuar
+                        if ($clause->simpleStmt(1)) {
+                            $this->visit($clause->simpleStmt(1));
+                        }
+                        continue;
+                    } catch (BreakException $e) {
+                        break;
+                    }
 
-                $condition = $this->visit($ctx->expression());
-
-                if (!is_bool($condition)) {
-                    $this->semanticError("La condición del for debe ser bool", $ctx);
-                    break;
+                    // Post (incremento normal)
+                    if ($clause->simpleStmt(1)) {
+                        $this->visit($clause->simpleStmt(1));
+                    }
                 }
-
-                if (!$condition) break;
-
-                $this->visit($ctx->block());
             }
-        }
 
-        // FOR infinito
-        else {
+            /* =========================
+            FOR tipo while
+            for cond { }
+            ========================== */
+            else if ($ctx->expression()) {
 
-            while (true) {
-                $this->visit($ctx->block());
+                while (true) {
+
+                    $condition = $this->visit($ctx->expression());
+
+                    if (!is_bool($condition)) {
+                        $this->semanticError("La condición del for debe ser bool", $ctx);
+                        break;
+                    }
+
+                    if (!$condition) break;
+
+                    try {
+                        $this->visit($ctx->block());
+                    } catch (ContinueException $e) {
+                        continue;
+                    } catch (BreakException $e) {
+                        break;
+                    }
+                }
             }
-        }
 
-        // Restaurar entorno
-        $this->env = $previousEnv;
+            /* =========================
+            FOR infinito
+            for { }
+            ========================== */
+            else {
+
+                while (true) {
+
+                    try {
+                        $this->visit($ctx->block());
+                    } catch (ContinueException $e) {
+                        continue;
+                    } catch (BreakException $e) {
+                        break;
+                    }
+                }
+            }
+
+        } finally {
+            $this->env = $previousEnv;
+        }
 
         return null;
     }
 
+    // Break
+    public function visitBreakStmt($ctx) {
+        throw new BreakException();
+    }
 
+    // Continue
+    public function visitContinueStmt($ctx) {
+        throw new ContinueException();
+    }
 
+    // Return
+    public function visitReturnStmt($ctx) {
+
+        // Si tiene expresión → evaluarla
+        if ($ctx->expList()) {
+
+            $values = [];
+
+            foreach ($ctx->expList()->expression() as $exp) {
+                $values[] = $this->visit($exp);
+            }
+
+            // Si solo hay un valor, devolverlo directo
+            if (count($values) === 1) {
+                throw new ReturnException($values[0]);
+            }
+
+            // Si hay múltiples valores (por si luego soportas eso)
+            throw new ReturnException($values);
+        }
+
+        // return sin valor
+        throw new ReturnException(null);
+    }
+
+}
+
+// Clase Break
+class BreakException extends Exception {}
+
+// Clase Continue
+class ContinueException extends Exception {}
+
+// Clase Return
+class ReturnException extends Exception {
+    public $value;
+
+    public function __construct($value) {
+        $this->value = $value;
+        parent::__construct();
+    }
 }
