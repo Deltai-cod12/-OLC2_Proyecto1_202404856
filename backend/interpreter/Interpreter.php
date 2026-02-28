@@ -210,46 +210,62 @@ public function visitFunctionDecl($ctx) {
         }
     }
 
-    // VARIABLES
-    public function visitVarDecl($ctx) {
-        $ids = $ctx->idList()->IDENTIFIER();
-        $dataType = $this->getTypeFromCtx($ctx->type());
+    // DECLARACION DE VARIABLES Y ARREGLOS
+    public function visitVarDecl($ctx){
+        // CASO 2: VAR IDENTIFIER arrayType (ASSIGN arrayLiteral)?
+        if ($ctx->arrayType() !== null) {
 
-        $values = [];
-        if ($ctx->expList()) {
-            foreach ($ctx->expList()->expression() as $exp) {
-                $values[] = $exp; // guardar la expresión, no evaluarla aún
+            $name = $ctx->IDENTIFIER()->getText();
+            $arrayTypeCtx = $ctx->arrayType();
+
+            $dimensions = [];
+
+            foreach ($arrayTypeCtx->arrayDimension() as $dim) {
+                $size = intval($dim->INT_LITERAL()->getText());
+                $dimensions[] = $size;
             }
+
+            $baseType = $arrayTypeCtx->baseType()->getText();
+
+            $defaultValue = $this->getDefaultValue($baseType);
+            $array = $this->createArray($dimensions, $defaultValue);
+
+            // Si tiene literal, sobrescribir valores
+            if ($ctx->arrayLiteral() !== null) {
+                $array = $this->visit($ctx->arrayLiteral());
+            }
+
+            $this->env->define($name, "array", $array, 0, 0);
+
+            return null;
         }
 
-        //declarar variables con valor por defecto
-        for ($i = 0; $i < count($ids); $i++) {
-            $token = $ids[$i]->getSymbol();
-            $name = $ids[$i]->getText();
-            $line = $token->getLine();
-            $column = $token->getCharPositionInLine();
+        // CASO 1: VAR idList type (ASSIGN expList)?
+        if ($ctx->idList() !== null) {
 
-            try {
-                // definir sin valor → usa default del tipo
-                $this->env->define($name, $dataType, null, $line, $column);
-            } catch (Exception $e) {
-                $this->semanticError($e->getMessage(), $ctx);
+            $ids = $ctx->idList()->IDENTIFIER();
+            $dataType = $this->getTypeFromCtx($ctx->type());
+
+            $values = [];
+
+            if ($ctx->expList() !== null) {
+                foreach ($ctx->expList()->expression() as $exp) {
+                    $values[] = $this->visit($exp);
+                }
             }
+
+            for ($i = 0; $i < count($ids); $i++) {
+
+                $name = $ids[$i]->getText();
+                $value = $values[$i] ?? null;
+
+                $this->env->define($name, $dataType, $value, 0, 0);
+            }
+
+            return null;
         }
 
-        //evaluar y asignar valores
-        for ($i = 0; $i < count($values); $i++) {
-            $name = $ids[$i]->getText();
-
-            try {
-                $value = $this->visit($values[$i]);
-                $this->env->assign($name, $value);
-            } catch (Exception $e) {
-                $this->semanticError($e->getMessage(), $ctx);
-            }
-        }
-
-        return null;
+        throw new \Exception("Error interno en varDecl");
     }
 
     // :=
@@ -308,30 +324,120 @@ public function visitFunctionDecl($ctx) {
 
     // ASIGNACIONES
     public function visitAssignment($ctx) {
+
         $op = $ctx->assignOp()->getText();
+
+        /* =====================================================
+        CASO 1: ASIGNACIÓN A ARREGLO
+        ===================================================== */
+        if ($ctx->assignTarget()->arrayAccess()) {
+
+            $arrayCtx = $ctx->assignTarget()->arrayAccess();
+            $name = $arrayCtx->IDENTIFIER()->getText();
+
+            try {
+                $array = $this->env->get($name);
+            } catch (Exception $e) {
+                $this->semanticError($e->getMessage(), $ctx);
+                return null;
+            }
+
+            $value = $this->visit($ctx->expList()->expression(0));
+
+            // Referencia para modificar en profundidad
+            $ref =& $array;
+
+            foreach ($arrayCtx->arrayIndex() as $indexCtx) {
+
+                $index = $this->visit($indexCtx->expression());
+
+                if (!is_int($index)) {
+                    $this->semanticError("Índice debe ser int", $ctx);
+                    return null;
+                }
+
+                if (!is_array($ref) || $index < 0 || $index >= count($ref)) {
+                    $this->semanticError("Índice fuera de rango", $ctx);
+                    return null;
+                }
+
+                $ref =& $ref[$index];
+            }
+
+            // Aplicar operador
+            switch ($op) {
+                case "=":
+                    $ref = $value;
+                    break;
+                case "+=":
+                    $ref = $this->safeAdd($ref, $value);
+                    break;
+                case "-=":
+                    $ref = $this->safeSub($ref, $value);
+                    break;
+                case "*=":
+                    $ref = $this->safeMul($ref, $value);
+                    break;
+                case "/=":
+                    $ref = $this->safeDiv($ref, $value, $name);
+                    break;
+                default:
+                    $ref = $value;
+            }
+
+            // Reasignar arreglo modificado al entorno
+            $this->env->assign($name, $array);
+
+            return null;
+        }
+
+        /* =====================================================
+        CASO 2: VARIABLES NORMALES
+        ===================================================== */
+
         $ids = $ctx->assignTarget()->idList()->IDENTIFIER();
+
         $values = [];
         foreach ($ctx->expList()->expression() as $exp) {
             $values[] = $this->visit($exp);
         }
+
         for ($i = 0; $i < count($ids); $i++) {
+
             $name = $ids[$i]->getText();
             $value = $values[$i] ?? null;
+
             try {
+
                 $current = $this->env->get($name);
+
                 switch ($op) {
-                    case "=": $newValue = $value; break;
-                    case "+=": $newValue = $this->safeAdd($current, $value); break;
-                    case "-=": $newValue = $this->safeSub($current, $value); break;
-                    case "*=": $newValue = $this->safeMul($current, $value); break;
-                    case "/=": $newValue = $this->safeDiv($current, $value, $name); break;
-                    default: $newValue = $value;
+                    case "=":
+                        $newValue = $value;
+                        break;
+                    case "+=":
+                        $newValue = $this->safeAdd($current, $value);
+                        break;
+                    case "-=":
+                        $newValue = $this->safeSub($current, $value);
+                        break;
+                    case "*=":
+                        $newValue = $this->safeMul($current, $value);
+                        break;
+                    case "/=":
+                        $newValue = $this->safeDiv($current, $value, $name);
+                        break;
+                    default:
+                        $newValue = $value;
                 }
+
                 $this->env->assign($name, $newValue);
+
             } catch (Exception $e) {
                 $this->semanticError($e->getMessage(), $ctx);
             }
         }
+
         return null;
     }
 
@@ -909,7 +1015,7 @@ public function visitFunctionDecl($ctx) {
                     if (!$condition) break;
 
                     try {
-                        $this->visit($ctx->block());
+                        $this->visitForBlock($ctx->block());
                     } catch (ContinueException $e) {
                         // Ejecutar post antes de continuar
                         if ($clause->simpleStmt(1)) {
@@ -979,6 +1085,15 @@ public function visitFunctionDecl($ctx) {
         return null;
     }
 
+    //For en For
+    private function visitForBlock($blockCtx) {
+
+        // NO crear nuevo Environment aquí
+        foreach ($blockCtx->statement() as $stmt) {
+            $this->visit($stmt);
+        }
+    }
+
     // Break
     public function visitBreakStmt($ctx) {
         throw new BreakException();
@@ -1012,6 +1127,91 @@ public function visitFunctionDecl($ctx) {
 
         // return sin valor
         throw new ReturnException(null);
+    }
+
+
+    // Arreglo Multidimensional
+    private function createArray($dimensions, $defaultValue) {
+
+        if (count($dimensions) === 0) {
+            return $defaultValue;
+        }
+
+        $size = array_shift($dimensions);
+        $array = [];
+
+        for ($i = 0; $i < $size; $i++) {
+            $array[] = $this->createArray($dimensions, $defaultValue);
+        }
+
+        return $array;
+    }
+
+    // Valor por Defercto segun tipo
+    private function getDefaultValue($type) {
+
+        switch ($type) {
+            case "int": return 0;
+            case "float": return 0.0;
+            case "bool": return false;
+            case "string": return "";
+            case "rune": return 0;
+            default: return 0;
+        }
+    }
+
+    // Literal de arreglos
+    public function visitArrayLiteral($ctx) {
+        return $this->visit($ctx->arrayElements());
+    }
+
+    public function visitArrayElements($ctx) {
+
+        $values = [];
+
+        foreach ($ctx->arrayElement() as $element) {
+
+            if ($element->expression()) {
+                $values[] = $this->visit($element->expression());
+            } else {
+                $values[] = $this->visit($element->arrayElements());
+            }
+        }
+
+        return $values;
+    }
+
+    // Acceso a arreglos
+    public function visitArrayAccess($ctx) {
+
+        $name = $ctx->IDENTIFIER()->getText();
+
+        try {
+            $array = $this->env->get($name);
+        } catch (Exception $e) {
+            $this->semanticError($e->getMessage(), $ctx);
+            return null;
+        }
+
+        foreach ($ctx->arrayIndex() as $indexCtx) {
+
+            $index = $this->visit($indexCtx->expression());
+
+            if (!is_int($index)) {
+                $this->semanticError("Índice de arreglo debe ser int", $ctx);
+                return null;
+            }
+
+            // VALIDACIÓN CORRECTA DE RANGO
+            if (!is_array($array) || $index < 0 || $index >= count($array)) {
+                $this->semanticError("Índice fuera de rango", $ctx);
+                return null;
+            }
+
+            $array = $array[$index];
+        }
+
+        return $array;
     }
 
 }
