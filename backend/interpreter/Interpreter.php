@@ -134,6 +134,8 @@ public function visitFunctionDecl($ctx) {
         } catch (ReturnException $e) {
 
             $this->env = $previousEnv;
+
+            // oporte múltiple retorno
             return $e->value;
         }
 
@@ -270,24 +272,37 @@ public function visitFunctionDecl($ctx) {
 
     // :=
     public function visitShortVarDecl($ctx) {
+
         $ids = $ctx->idList()->IDENTIFIER();
         $values = [];
+
         foreach ($ctx->expList()->expression() as $exp) {
             $values[] = $this->visit($exp);
         }
+
+        //  Si solo hay 1 expresión pero devuelve múltiples valores
+        if (count($values) === 1 && is_array($values[0])) {
+            $values = $values[0];
+        }
+
         for ($i = 0; $i < count($ids); $i++) {
+
             $token = $ids[$i]->getSymbol();
             $name = $ids[$i]->getText();
             $value = $values[$i] ?? null;
+
             $line = $token->getLine();
             $column = $token->getCharPositionInLine();
+
             $dataType = $this->inferType($value);
+
             try {
                 $this->env->define($name, $dataType, $value, $line, $column);
             } catch (Exception $e) {
                 $this->semanticError($e->getMessage(), $ctx);
             }
         }
+
         return null;
     }
 
@@ -299,6 +314,10 @@ public function visitFunctionDecl($ctx) {
 
         foreach ($ctx->expList()->expression() as $exp) {
             $values[] = $this->visit($exp);
+        }
+
+        if (count($values) === 1 && is_array($values[0])) {
+            $values = $values[0];
         }
 
         for ($i = 0; $i < count($ids); $i++) {
@@ -398,9 +417,13 @@ public function visitFunctionDecl($ctx) {
         $ids = $ctx->assignTarget()->idList()->IDENTIFIER();
 
         $values = [];
-        foreach ($ctx->expList()->expression() as $exp) {
-            $values[] = $this->visit($exp);
-        }
+            foreach ($ctx->expList()->expression() as $exp) {
+                $values[] = $this->visit($exp);
+            }
+
+            if (count($values) === 1 && is_array($values[0])) {
+                $values = $values[0];
+            }
 
         for ($i = 0; $i < count($ids); $i++) {
 
@@ -448,9 +471,13 @@ public function visitFunctionDecl($ctx) {
         $ids = $ctx->assignTarget()->idList()->IDENTIFIER();
 
         $values = [];
-        foreach ($ctx->expList()->expression() as $exp) {
-            $values[] = $this->visit($exp);
-        }
+            foreach ($ctx->expList()->expression() as $exp) {
+                $values[] = $this->visit($exp);
+            }
+
+            if (count($values) === 1 && is_array($values[0])) {
+                $values = $values[0];
+            }
 
         for ($i = 0; $i < count($ids); $i++) {
 
@@ -1088,9 +1115,17 @@ public function visitFunctionDecl($ctx) {
     //For en For
     private function visitForBlock($blockCtx) {
 
-        // NO crear nuevo Environment aquí
-        foreach ($blockCtx->statement() as $stmt) {
-            $this->visit($stmt);
+        $previousEnv = $this->env;
+
+        //  Nuevo scope por iteración
+        $this->env = new Environment($previousEnv);
+
+        try {
+            foreach ($blockCtx->statement() as $stmt) {
+                $this->visit($stmt);
+            }
+        } finally {
+            $this->env = $previousEnv;
         }
     }
 
