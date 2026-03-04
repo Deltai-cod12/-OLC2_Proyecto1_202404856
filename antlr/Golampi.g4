@@ -207,6 +207,7 @@ primary
 : functionCall
 | arrayAccess
 | pointerAccess
+| arrayLiteral
 | INT_LITERAL
 | FLOAT_LITERAL
 | STRING

@@ -376,8 +376,7 @@ namespace generated {
 		{
 			switch ($actionIndex) {
 				case 0:
-
-				break;
+				4;
 			}
 		}
 

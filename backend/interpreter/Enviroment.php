@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/Symbol.php';
+require_once __DIR__ . '/Pointervalue.php';   // ← NUEVO: necesario para checkType
 
 class Environment {
 
@@ -9,7 +10,7 @@ class Environment {
     private $scopeLevel;
 
     public function __construct($parent = null) {
-        $this->parent = $parent;
+        $this->parent     = $parent;
         $this->scopeLevel = ($parent == null) ? 0 : $parent->scopeLevel + 1;
     }
 
@@ -33,12 +34,12 @@ class Environment {
 
         $this->symbols[$name] = new Symbol(
             $name,
-            $dataType,              // tipo real (int, float, etc)
+            $dataType,
             $value,
             $this->scopeLevel,
             $line,
             $column,
-            false                   // no constante
+            false
         );
     }
 
@@ -94,7 +95,7 @@ class Environment {
     }
 
     
-    // OBTENER
+    // OBTENER valor
     public function get($name) {
 
         if (array_key_exists($name, $this->symbols)) {
@@ -109,6 +110,24 @@ class Environment {
     }
 
     
+    // =====================================================================
+    // NUEVO: OBTENER EL ENTORNO EXACTO donde vive la variable
+    // Usado por el operador & para construir un PointerValue correcto.
+    // =====================================================================
+    public function getEnvFor(string $name): Environment {
+
+        if (array_key_exists($name, $this->symbols)) {
+            return $this;
+        }
+
+        if ($this->parent !== null) {
+            return $this->parent->getEnvFor($name);
+        }
+
+        throw new Exception("Variable '$name' no definida");
+    }
+
+
     // VALORES POR DEFECTO
     private function getDefaultValue($type) {
 
@@ -127,6 +146,10 @@ class Environment {
 
             case "string":
                 return "";
+
+            // ← NUEVO: punteros inician en nil (null)
+            case "pointer":
+                return null;
 
             default:
                 return null;
@@ -154,7 +177,12 @@ class Environment {
             case "string":
                 return is_string($value);
 
+            // ← NUEVO: los punteros aceptan PointerValue o null (nil)
+            case "pointer":
+                return ($value instanceof PointerValue) || $value === null;
+
             default:
+                // arrays y otros tipos compuestos: el Interpreter garantiza la coherencia
                 return true;
         }
     }
@@ -167,11 +195,11 @@ class Environment {
 
         foreach ($this->symbols as $symbol) {
             $result[] = [
-                "id" => $symbol->id,
-                "tipo" => $symbol->type,      // ahora es tipo real
-                "ambito" => $symbol->scope,
-                "valor" => $symbol->value,
-                "linea" => $symbol->line,
+                "id"      => $symbol->id,
+                "tipo"    => $symbol->type,
+                "ambito"  => $symbol->scope,
+                "valor"   => $symbol->value,
+                "linea"   => $symbol->line,
                 "columna" => $symbol->column
             ];
         }

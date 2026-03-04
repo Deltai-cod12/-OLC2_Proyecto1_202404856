@@ -400,3 +400,45 @@ WS
 
 
 Funcionamiento de los demas tipos de variables, revisar lo puesto en el .txt
+
+
+
+
+
+func sort(a [5]int) [5]int {
+	for i := 0; i < 5; i++ {
+		for j := 0; j < 4; j++ {
+			if a[j] > a[j+1] {
+				temp := a[j]
+				a[j] = a[j+1]
+				a[j+1] = temp
+			}
+		}
+	}
+	return a
+}
+
+func sortRef(a *[5]int) {
+	for i := 0; i < 5; i++ {
+		for j := 0; j < 4; j++ {
+			if a[j] > a[j+1] {
+				temp := a[j]
+				a[j] = a[j+1]
+				a[j+1] = temp
+			}
+		}
+	}
+}
+
+func main() {
+	nums1 := [5]int{5, 3, 4, 1, 2}
+	nums2 := [5]int{5, 3, 4, 1, 2}
+	nums1 = sort(nums1)
+	sortRef(&nums2)
+	fmt.Println(nums1[0], nums1[1], nums1[2], nums1[3], nums1[4])
+	fmt.Println(nums2[0], nums2[1], nums2[2], nums2[3], nums2[4])
+}
+
+
+//1 2 3 4 5
+//1 2 3 4 5
