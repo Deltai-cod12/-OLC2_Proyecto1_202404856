@@ -8,25 +8,29 @@ class Interpreter extends GolampiBaseVisitor {
     private $output = "";
     private $errorReport;
 
-    // pruebas con debugs
+    // CONTROL DE DEBUG 
     private $debugMode = false;
 
+    // Constructor
     public function __construct($environment, $errorReport) {
         $this->env         = $environment;
         $this->errorReport = $errorReport;
     }
 
+    // Retorna la salida generada
     public function getOutput() {
         return $this->output;
     }
 
-    // Debug 
+    // Debug helper 
+    // Imprime mensajes de debug (solo si debugMode = true)
     private function dbg(string $msg) {
         if ($this->debugMode) {
             $this->output .= "[DBG] $msg\n";
         }
     }
 
+    // Convierte cualquier valor a string legible para debug
     private function dumpVal($v): string {
         if ($v instanceof PointerValue) return "PointerValue->&{$v->name}";
         if (is_array($v))  return "array[" . count($v) . "](" . implode(",", array_slice($v, 0, 6)) . ")";
@@ -35,11 +39,13 @@ class Interpreter extends GolampiBaseVisitor {
         return (string)$v;
     }
 
+    // Agrega texto a la salida con salto de línea
     private function println($text) {
         if (is_bool($text)) $text = $text ? "true" : "false";
         $this->output .= $text . "\n";
     }
 
+    // Registra un error semántico en el reporte
     private function semanticError($message, $ctx = null) {
         $line   = 0;
         $column = 0;
@@ -51,6 +57,7 @@ class Interpreter extends GolampiBaseVisitor {
         $this->errorReport->add("Semántico", $message, $line, $column);
     }
 
+    // Infiere el tipo de un valor PHP al tipo Golampi
     private function inferType($value) {
         if ($value instanceof PointerValue) return "pointer";
         if (is_array($value))  return "array";
@@ -62,8 +69,16 @@ class Interpreter extends GolampiBaseVisitor {
         return "int";
     }
 
+    // Obtiene el tipo Golampi desde el contexto de la gramática
     private function getTypeFromCtx($typeCtx) {
         if ($typeCtx == null) return null;
+
+        // Detectar puntero: *int, *float, *[5]int, etc.
+        if ($typeCtx->pointerType() !== null) return "pointer";
+
+        // Detectar array
+        if ($typeCtx->arrayType() !== null) return "array";
+
         $text = $typeCtx->getText();
         switch ($text) {
             case "int": case "int32": return "int";
@@ -75,11 +90,13 @@ class Interpreter extends GolampiBaseVisitor {
         }
     }
 
+    // Verifica si un tipo de la gramática es puntero (*T)
     private function isPointerType($typeCtx): bool {
         if ($typeCtx === null) return false;
         return ($typeCtx->pointerType() !== null);
     }
 
+    // Extrae el nombre de variable del operador & (address-of)
     private function extractAddressTarget($unaryCtx) {
         if ($unaryCtx->primary()) {
             $primary = $unaryCtx->primary();
@@ -91,6 +108,7 @@ class Interpreter extends GolampiBaseVisitor {
     }
 
     // PROGRAMA
+    // Punto de entrada: registra funciones y ejecuta main()
     public function visitProgram($ctx) {
 
         $this->dbg("=== visitProgram: registrando funciones ===");
@@ -113,6 +131,7 @@ class Interpreter extends GolampiBaseVisitor {
     }
 
     // FUNCIONES
+    // Declaración de función: guarda nombre, parámetros y bloque
     public function visitFunctionDecl($ctx) {
 
         $name   = $ctx->IDENTIFIER()->getText();
@@ -142,6 +161,7 @@ class Interpreter extends GolampiBaseVisitor {
         return null;
     }
 
+    // Ejecuta una función de usuario con sus argumentos
     private function executeFunction($name, $args) {
 
         if (!isset($this->functions[$name])) {
@@ -198,6 +218,7 @@ class Interpreter extends GolampiBaseVisitor {
     }
 
     // BLOQUES
+    // Bloque de código: crea nuevo scope y ejecuta statements
     public function visitBlock($ctx) {
         $previous  = $this->env;
         $this->env = new Environment($previous);
@@ -208,10 +229,12 @@ class Interpreter extends GolampiBaseVisitor {
         return null;
     }
 
+    // Statement genérico
     public function visitStatement($ctx)     { return $this->visitChildren($ctx); }
     public function visitStatementCore($ctx) { return $this->visitChildren($ctx); }
 
     // FUNCIONES BUILT-IN
+    // Llamada a función (built-ins y funciones de usuario)
     public function visitFunctionCall($ctx) {
 
         $name = $ctx->functionName()->getText();
@@ -230,6 +253,91 @@ class Interpreter extends GolampiBaseVisitor {
             return null;
         }
 
+        // BUILT-IN: len
+        // Retorna la longitud de un string o arreglo
+        if ($name === "len") {
+            if (!$ctx->args()) {
+                $this->semanticError("len() requiere un argumento", $ctx);
+                return null;
+            }
+            $val = $this->visit($ctx->args()->expList()->expression(0));
+            if (is_string($val)) {
+                return mb_strlen($val, 'UTF-8');
+            }
+            if (is_array($val)) {
+                return count($val);
+            }
+            $this->semanticError("len() requiere un string o arreglo", $ctx);
+            return null;
+        }
+
+        // BUILT-IN: now
+        // Retorna fecha y hora actual como string
+        if ($name === "now") {
+            return date("Y-m-d H:i:s");
+        }
+
+        // BUILT-IN: substr
+        // Extrae subcadena: substr(s, inicio, longitud)
+        if ($name === "substr") {
+            if (!$ctx->args()) {
+                $this->semanticError("substr() requiere 3 argumentos", $ctx);
+                return null;
+            }
+            $exprs = $ctx->args()->expList()->expression();
+            if (count($exprs) !== 3) {
+                $this->semanticError("substr() requiere exactamente 3 argumentos: substr(s, inicio, longitud)", $ctx);
+                return null;
+            }
+            $str    = $this->visit($exprs[0]);
+            $inicio = $this->visit($exprs[1]);
+            $largo  = $this->visit($exprs[2]);
+
+            if (!is_string($str)) {
+                $this->semanticError("substr(): el primer argumento debe ser string", $ctx);
+                return null;
+            }
+            if (!is_int($inicio) || !is_int($largo)) {
+                $this->semanticError("substr(): inicio y longitud deben ser int", $ctx);
+                return null;
+            }
+            $len = mb_strlen($str, 'UTF-8');
+            if ($inicio < 0 || $inicio >= $len) {
+                $this->semanticError("substr(): índice inicial fuera de rango ($inicio)", $ctx);
+                return null;
+            }
+            if ($largo < 0 || $inicio + $largo > $len) {
+                $this->semanticError("substr(): longitud inválida ($largo)", $ctx);
+                return null;
+            }
+            return mb_substr($str, $inicio, $largo, 'UTF-8');
+        }
+
+        // BUILT-IN: typeOf
+        // Retorna el tipo de una variable como string
+        if ($name === "typeOf") {
+            if (!$ctx->args()) {
+                $this->semanticError("typeOf() requiere un argumento", $ctx);
+                return null;
+            }
+            $val  = $this->visit($ctx->args()->expList()->expression(0));
+            $type = $this->inferType($val);
+
+            // Mapear a los nombres del lenguaje Golampi
+            switch ($type) {
+                case "int":     return "int";
+                case "float":   return "float32";
+                case "bool":    return "bool";
+                case "string":  return "string";
+                case "rune":    return "rune";
+                case "pointer": return "pointer";
+                case "array":   return "array";
+                case "nil":     return "nil";
+                default:        return $type;
+            }
+        }
+
+        // FUNCIONES DEL USUARIO
         $args = [];
         if ($ctx->args()) {
             foreach ($ctx->args()->expList()->expression() as $exp) {
@@ -248,6 +356,7 @@ class Interpreter extends GolampiBaseVisitor {
     }
 
     // DECLARACION DE VARIABLES Y ARREGLOS
+    // Declaración de variable con var (var x int, var a [5]int)
     public function visitVarDecl($ctx) {
 
         if ($ctx->arrayType() !== null) {
@@ -270,7 +379,8 @@ class Interpreter extends GolampiBaseVisitor {
 
         if ($ctx->idList() !== null) {
             $ids      = $ctx->idList()->IDENTIFIER();
-            $dataType = $this->getTypeFromCtx($ctx->type());
+            $typeCtx  = $ctx->type();
+            $dataType = $this->getTypeFromCtx($typeCtx);
             $values   = [];
             if ($ctx->expList() !== null) {
                 foreach ($ctx->expList()->expression() as $exp) {
@@ -280,6 +390,19 @@ class Interpreter extends GolampiBaseVisitor {
             for ($i = 0; $i < count($ids); $i++) {
                 $name  = $ids[$i]->getText();
                 $value = $values[$i] ?? null;
+
+                // ← NUEVO: si el tipo declarado es array y no hay valor,
+                // construir el arreglo con valores por defecto
+                if ($dataType === "array" && $value === null) {
+                    $arrayTypeCtx = $typeCtx->arrayType();
+                    $dimensions   = [];
+                    foreach ($arrayTypeCtx->arrayDimension() as $dim) {
+                        $dimensions[] = intval($dim->INT_LITERAL()->getText());
+                    }
+                    $baseType = $arrayTypeCtx->baseType()->getText();
+                    $value    = $this->createArray($dimensions, $this->getDefaultValue($baseType));
+                }
+
                 $this->dbg("varDecl '$name' tipo=$dataType val=" . $this->dumpVal($value));
                 $this->env->define($name, $dataType, $value, 0, 0);
             }
@@ -290,6 +413,7 @@ class Interpreter extends GolampiBaseVisitor {
     }
 
     // :=
+    // Declaración corta := (x := 10)
     public function visitShortVarDecl($ctx) {
 
         $ids    = $ctx->idList()->IDENTIFIER();
@@ -330,6 +454,7 @@ class Interpreter extends GolampiBaseVisitor {
     }
 
     // := en for
+    // Declaración corta := dentro de for (init de forClause)
     public function visitShortVarDeclNoSemi($ctx) {
 
         $ids    = $ctx->idList()->IDENTIFIER();
@@ -361,6 +486,7 @@ class Interpreter extends GolampiBaseVisitor {
     }
 
     // ASIGNACIONES
+    // Asignación (=, +=, -=, *=, /=) — soporta variables, arreglos y punteros
     public function visitAssignment($ctx) {
 
         $op = $ctx->assignOp()->getText();
@@ -493,6 +619,7 @@ class Interpreter extends GolampiBaseVisitor {
     }
 
     // Asignacion en for
+    // Asignación dentro de for (post de forClause)
     public function visitAssignmentNoSemi($ctx) {
 
         $op = $ctx->assignOp()->getText();
@@ -569,6 +696,7 @@ class Interpreter extends GolampiBaseVisitor {
     }
 
     // CONSTANTES
+    // Declaración de constante con const
     public function visitConstDecl($ctx) {
         $token    = $ctx->IDENTIFIER()->getSymbol();
         $name     = $ctx->IDENTIFIER()->getText();
@@ -582,8 +710,10 @@ class Interpreter extends GolampiBaseVisitor {
     }
 
     // EXPRESIONES
+    // Expresión — delega al nivel OR
     public function visitExpression($ctx)    { return $this->visit($ctx->logicalOrExp()); }
 
+    // Operador lógico OR (||)
     public function visitLogicalOrExp($ctx) {
         $result = $this->visit($ctx->logicalAndExp(0));
         if (count($ctx->logicalAndExp()) > 1) {
@@ -598,6 +728,7 @@ class Interpreter extends GolampiBaseVisitor {
         return $result;
     }
 
+    // Operador lógico AND (&&)
     public function visitLogicalAndExp($ctx) {
         $result = $this->visit($ctx->equalityExp(0));
         if (count($ctx->equalityExp()) > 1) {
@@ -612,6 +743,7 @@ class Interpreter extends GolampiBaseVisitor {
         return $result;
     }
 
+    // Operadores de igualdad (== y !=)
     public function visitEqualityExp($ctx) {
         $left = $this->visit($ctx->relationalExp(0));
         for ($i = 1; $i < count($ctx->relationalExp()); $i++) {
@@ -622,6 +754,7 @@ class Interpreter extends GolampiBaseVisitor {
         return $left;
     }
 
+    // Incremento y decremento (++ y --)
     public function visitIncDecStmt($ctx) {
         $name = $ctx->IDENTIFIER()->getText();
         try {
@@ -632,6 +765,7 @@ class Interpreter extends GolampiBaseVisitor {
         return null;
     }
 
+    // Operadores relacionales (>, >=, <, <=)
     public function visitRelationalExp($ctx) {
         $left = $this->visit($ctx->additiveExp(0));
         for ($i = 1; $i < count($ctx->additiveExp()); $i++) {
@@ -642,6 +776,7 @@ class Interpreter extends GolampiBaseVisitor {
         return $left;
     }
 
+    // Operadores aditivos (+ y -)
     public function visitAdditiveExp($ctx) {
         $left = $this->visit($ctx->multiplicativeExp(0));
         for ($i = 1; $i < count($ctx->multiplicativeExp()); $i++) {
@@ -653,6 +788,7 @@ class Interpreter extends GolampiBaseVisitor {
         return $left;
     }
 
+    // Operadores multiplicativos (*, /, %)
     public function visitMultiplicativeExp($ctx) {
         $left = $this->visit($ctx->unaryExp(0));
         for ($i = 1; $i < count($ctx->unaryExp()); $i++) {
@@ -668,6 +804,7 @@ class Interpreter extends GolampiBaseVisitor {
     }
 
     // UNARY — & y *
+    // Expresión unaria: negación (-), NOT (!), referencia (&), desreferencia (*)
     public function visitUnaryExp($ctx) {
 
         if ($ctx->primary()) return $this->visit($ctx->primary());
@@ -712,6 +849,7 @@ class Interpreter extends GolampiBaseVisitor {
     }
 
     // POINTER ACCESS — *varName, **varName
+    // Lectura de puntero: *var o **var
     public function visitPointerAccess($ctx) {
 
         $name  = $ctx->IDENTIFIER()->getText();
@@ -741,6 +879,7 @@ class Interpreter extends GolampiBaseVisitor {
     }
 
     // PRIMARY
+    // Expresión primaria: literales, identificadores, llamadas, arreglos
     public function visitPrimary($ctx) {
 
         if ($ctx->LPAREN())        return $this->visit($ctx->expression());
@@ -773,6 +912,7 @@ class Interpreter extends GolampiBaseVisitor {
     }
 
     // OPERACIONES SEGURAS
+    // Suma segura con verificación de tipos
     private function safeAdd($left, $right) {
         $typeL = $this->inferType($left);
         $typeR = $this->inferType($right);
@@ -782,6 +922,7 @@ class Interpreter extends GolampiBaseVisitor {
         $this->semanticError("Tipos incompatibles en suma"); return 0;
     }
 
+    // Resta segura con verificación de tipos
     private function safeSub($left, $right) {
         $typeL = $this->inferType($left); $typeR = $this->inferType($right);
         if (in_array($typeL, ["int","float","rune"]) && in_array($typeR, ["int","float","rune"])) {
@@ -791,6 +932,7 @@ class Interpreter extends GolampiBaseVisitor {
         $this->semanticError("Tipos incompatibles en resta"); return null;
     }
 
+    // Multiplicación segura con verificación de tipos
     private function safeMul($a, $b) {
         if ($a === null || $b === null) { $this->semanticError("null en multiplicación"); return 0; }
         if (is_string($a) && is_int($b)) return str_repeat($a, $b);
@@ -802,6 +944,7 @@ class Interpreter extends GolampiBaseVisitor {
         $this->semanticError("Tipos incompatibles en multiplicación"); return 0;
     }
 
+    // División segura con verificación de tipos y división por cero
     private function safeDiv($a, $b, $ctx) {
         if (!is_numeric($a) || !is_numeric($b)) { $this->semanticError("Tipos incompatibles en división"); return 0; }
         if ($b == 0) { $this->semanticError("División por cero"); return 0; }
@@ -809,12 +952,14 @@ class Interpreter extends GolampiBaseVisitor {
         return intval($a / $b);
     }
 
+    // Módulo seguro con verificación de tipos
     private function safeMod($a, $b, $ctx) {
         if (!is_numeric($a) || !is_numeric($b) || is_float($a) || is_float($b)) { $this->semanticError("Tipos incompatibles en módulo"); return 0; }
         if ($b == 0) { $this->semanticError("Módulo por cero"); return 0; }
         return intval($a) % intval($b);
     }
 
+    // Comparación de igualdad segura (== y !=)
     private function safeEquality($a, $b, $op) {
         $typeL = $this->inferType($a); $typeR = $this->inferType($b);
         if (in_array($typeL, ["int","float","rune"]) && in_array($typeR, ["int","float","rune"])) {
@@ -825,6 +970,7 @@ class Interpreter extends GolampiBaseVisitor {
         $this->semanticError("Tipos incompatibles en igualdad"); return false;
     }
 
+    // Comparación relacional segura (>, >=, <, <=)
     private function safeRelational($a, $b, $op) {
         $typeL = $this->inferType($a); $typeR = $this->inferType($b);
         if (in_array($typeL, ["int","float","rune"]) && in_array($typeR, ["int","float","rune"])) {
@@ -838,6 +984,7 @@ class Interpreter extends GolampiBaseVisitor {
     }
 
     // CONTROL DE FLUJO
+    // Sentencia if / else if / else
     public function visitIfStmt($ctx) {
         $previousEnv = $this->env;
         $this->env   = new Environment($previousEnv);
@@ -850,6 +997,7 @@ class Interpreter extends GolampiBaseVisitor {
         return null;
     }
 
+    // Sentencia switch con cases y default
     public function visitSwitchStmt($ctx) {
         $switchValue = $this->visit($ctx->expression()); $matched = false;
         try {
@@ -872,6 +1020,7 @@ class Interpreter extends GolampiBaseVisitor {
         return null;
     }
 
+    // Sentencia for: clásico (init;cond;post), while y for infinito
     public function visitForStmt($ctx) {
         $previousEnv = $this->env;
         $this->env   = new Environment($previousEnv);
@@ -904,6 +1053,7 @@ class Interpreter extends GolampiBaseVisitor {
         return null;
     }
 
+    // Ejecuta el bloque interno del for con su propio scope por iteración
     private function visitForBlock($blockCtx) {
         $previousEnv = $this->env;
         $this->env   = new Environment($previousEnv);
@@ -911,9 +1061,12 @@ class Interpreter extends GolampiBaseVisitor {
         finally { $this->env = $previousEnv; }
     }
 
+    // Sentencia break — lanza excepción para salir del for/switch
     public function visitBreakStmt($ctx)    { throw new BreakException(); }
+    // Sentencia continue — lanza excepción para saltar iteración del for
     public function visitContinueStmt($ctx) { throw new ContinueException(); }
 
+    // Sentencia return — lanza excepción con el valor de retorno
     public function visitReturnStmt($ctx) {
         if ($ctx->expList()) {
             $values = [];
@@ -928,6 +1081,7 @@ class Interpreter extends GolampiBaseVisitor {
     }
 
     // ARREGLOS
+    // Crea un arreglo multidimensional con valores por defecto
     private function createArray($dimensions, $defaultValue) {
         if (count($dimensions) === 0) return $defaultValue;
         $size = array_shift($dimensions); $array = [];
@@ -935,6 +1089,7 @@ class Interpreter extends GolampiBaseVisitor {
         return $array;
     }
 
+    // Retorna el valor por defecto según el tipo base
     private function getDefaultValue($type) {
         switch ($type) {
             case "int": return 0; case "float": return 0.0; case "bool": return false;
@@ -942,12 +1097,14 @@ class Interpreter extends GolampiBaseVisitor {
         }
     }
 
+    // Literal de arreglo: [5]int{1, 2, 3, 4, 5}
     public function visitArrayLiteral($ctx) {
         $result = $this->visit($ctx->arrayElements());
         $this->dbg("visitArrayLiteral → " . $this->dumpVal($result));
         return $result;
     }
 
+    // Elementos del literal de arreglo
     public function visitArrayElements($ctx) {
         $values = [];
         foreach ($ctx->arrayElement() as $element) {
@@ -958,6 +1115,7 @@ class Interpreter extends GolampiBaseVisitor {
     }
 
     // ACCESO A ARREGLOS — auto-desreferencia si es puntero a arreglo
+    // Acceso a arreglo: a[i] — con auto-desreferencia si es puntero
     public function visitArrayAccess($ctx) {
 
         $name = $ctx->IDENTIFIER()->getText();
