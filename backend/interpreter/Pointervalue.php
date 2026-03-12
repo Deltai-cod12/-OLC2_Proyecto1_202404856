@@ -1,23 +1,14 @@
 <?php
 
-/**
- * PointerValue
- * 
- * Representa un puntero en el lenguaje Golampi.
- * En lugar de almacenar una dirección de memoria real, guarda una referencia
- * al Environment que contiene la variable y el nombre de la misma.
- * 
- * Esto permite implementar la semántica de paso por referencia:
- *   &x   → crea PointerValue($env, 'x')
- *   *ptr → llama a $ptr->getValue()
- *   *ptr = v → llama a $ptr->setValue(v)
- */
+// Clase que representa un puntero en Golampi
+// En lugar de guardar una dirección de memoria real,
+// guardo el entorno donde está la variable y su nombre.
 class PointerValue {
 
-    /** @var Environment El entorno donde vive la variable apuntada */
+    // Entorno donde existe la variable apuntada
     public $env;
 
-    /** @var string Nombre de la variable apuntada */
+    // Nombre de la variable a la que apunta
     public $name;
 
     public function __construct(Environment $env, string $name) {
@@ -25,26 +16,20 @@ class PointerValue {
         $this->name = $name;
     }
 
-    /**
-     * Leer el valor apuntado.
-     * Equivalente a desreferenciar: *ptr
-     */
+    // Obtener el valor de la variable apuntada
+    // Equivalente a usar *ptr en el lenguaje
     public function getValue() {
         return $this->env->get($this->name);
     }
 
-    /**
-     * Escribir un valor en la variable apuntada.
-     * Equivalente a: *ptr = value
-     * Modifica directamente la variable en su entorno original.
-     */
+    // Cambiar el valor de la variable apuntada
+    // Equivalente a: *ptr = valor
+    // Modifica directamente la variable original
     public function setValue($value): void {
         $this->env->assign($this->name, $value);
     }
 
-    /**
-     * Representación textual (útil para depuración)
-     */
+    // Representación en texto del puntero (útil para depuración)
     public function __toString(): string {
         return "pointer(&{$this->name})";
     }

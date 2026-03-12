@@ -1,5 +1,8 @@
 <?php
 
+require_once __DIR__ . '/SymbolTable.php';
+require_once __DIR__ . '/Symbol.php';
+
 use generated\GolampiBaseVisitor;
 
 class Interpreter extends GolampiBaseVisitor {
@@ -8,7 +11,7 @@ class Interpreter extends GolampiBaseVisitor {
     private $output = "";
     private $errorReport;
 
-    // CONTROL DE DEBUG 
+    // ← CONTROL DE DEBUG: cambiar a false para quitar los mensajes
     private $debugMode = false;
 
     // Constructor
@@ -22,7 +25,7 @@ class Interpreter extends GolampiBaseVisitor {
         return $this->output;
     }
 
-    // Debug helper 
+    // ── Debug helper ──────────────────────────────────────────────────────────
     // Imprime mensajes de debug (solo si debugMode = true)
     private function dbg(string $msg) {
         if ($this->debugMode) {
@@ -33,11 +36,12 @@ class Interpreter extends GolampiBaseVisitor {
     // Convierte cualquier valor a string legible para debug
     private function dumpVal($v): string {
         if ($v instanceof PointerValue) return "PointerValue->&{$v->name}";
-        if (is_array($v))  return "array[" . count($v) . "](" . implode(",", array_slice($v, 0, 6)) . ")";
+        if (is_array($v))  return "array[" . count($v) . "](" . implode(",", array_map([$this, 'dumpVal'], array_slice($v, 0, 6))) . ")";
         if (is_bool($v))   return $v ? "true" : "false";
         if ($v === null)   return "null";
         return (string)$v;
     }
+    // ─────────────────────────────────────────────────────────────────────────
 
     // Agrega texto a la salida con salto de línea
     private function println($text) {
@@ -117,6 +121,7 @@ class Interpreter extends GolampiBaseVisitor {
             $this->visit($func);
         }
 
+
         $this->dbg("Funciones registradas: [" . implode(", ", array_keys($this->functions)) . "]");
 
         if (isset($this->functions["main"])) {
@@ -158,6 +163,19 @@ class Interpreter extends GolampiBaseVisitor {
             "block"  => $ctx->block()
         ];
 
+        // Registrar la función en la tabla de símbolos
+        $token = $ctx->IDENTIFIER()->getSymbol();
+        $symbol = new Symbol(
+            $name,
+            "función",
+            "—",
+            "global",
+            $token->getLine(),
+            $token->getCharPositionInLine(),
+            false
+        );
+        SymbolTable::getInstance()->add($symbol);
+
         return null;
     }
 
@@ -177,7 +195,7 @@ class Interpreter extends GolampiBaseVisitor {
         }
 
         $previousEnv = $this->env;
-        $this->env   = new Environment($previousEnv);
+        $this->env   = new Environment($previousEnv, $name);  // ámbito = nombre de la función
 
         try {
 
@@ -223,7 +241,29 @@ class Interpreter extends GolampiBaseVisitor {
         $previous  = $this->env;
         $this->env = new Environment($previous);
         foreach ($ctx->statement() as $stmt) {
-            $this->visit($stmt);
+            // Cada statement es independiente — un error no detiene los siguientes
+            try {
+                $this->visit($stmt);
+            } catch (ReturnException $e) {
+                // return debe propagarse siempre
+                $this->env = $previous;
+                throw $e;
+            } catch (BreakException $e) {
+                // break debe propagarse siempre
+                $this->env = $previous;
+                throw $e;
+            } catch (ContinueException $e) {
+                // continue debe propagarse siempre
+                $this->env = $previous;
+                throw $e;
+            } catch (Throwable $e) {
+                // Cualquier otro error: registrar y continuar con el siguiente stmt
+                $line = 0;
+                if (method_exists($stmt, 'start') && $stmt->start !== null) {
+                    $line = $stmt->start->getLine();
+                }
+                $this->semanticError("Error en sentencia: " . $e->getMessage(), $stmt);
+            }
         }
         $this->env = $previous;
         return null;
@@ -253,8 +293,10 @@ class Interpreter extends GolampiBaseVisitor {
             return null;
         }
 
-        // BUILT-IN: len
-        // Retorna la longitud de un string o arreglo
+        /* =============================
+        BUILT-IN: len
+        Retorna la longitud de un string o arreglo
+        ============================== */
         if ($name === "len") {
             if (!$ctx->args()) {
                 $this->semanticError("len() requiere un argumento", $ctx);
@@ -271,14 +313,18 @@ class Interpreter extends GolampiBaseVisitor {
             return null;
         }
 
-        // BUILT-IN: now
-        // Retorna fecha y hora actual como string
+        /* =============================
+        BUILT-IN: now
+        Retorna fecha y hora actual como string
+        ============================== */
         if ($name === "now") {
             return date("Y-m-d H:i:s");
         }
 
-        // BUILT-IN: substr
-        // Extrae subcadena: substr(s, inicio, longitud)
+        /* =============================
+        BUILT-IN: substr
+        Extrae subcadena: substr(s, inicio, longitud)
+        ============================== */
         if ($name === "substr") {
             if (!$ctx->args()) {
                 $this->semanticError("substr() requiere 3 argumentos", $ctx);
@@ -313,8 +359,10 @@ class Interpreter extends GolampiBaseVisitor {
             return mb_substr($str, $inicio, $largo, 'UTF-8');
         }
 
-        // BUILT-IN: typeOf
-        // Retorna el tipo de una variable como string
+        /* =============================
+        BUILT-IN: typeOf
+        Retorna el tipo de una variable como string
+        ============================== */
         if ($name === "typeOf") {
             if (!$ctx->args()) {
                 $this->semanticError("typeOf() requiere un argumento", $ctx);
@@ -337,7 +385,9 @@ class Interpreter extends GolampiBaseVisitor {
             }
         }
 
-        // FUNCIONES DEL USUARIO
+        /* =============================
+        FUNCIONES DEL USUARIO
+        ============================== */
         $args = [];
         if ($ctx->args()) {
             foreach ($ctx->args()->expList()->expression() as $exp) {
@@ -1057,8 +1107,26 @@ class Interpreter extends GolampiBaseVisitor {
     private function visitForBlock($blockCtx) {
         $previousEnv = $this->env;
         $this->env   = new Environment($previousEnv);
-        try { foreach ($blockCtx->statement() as $stmt) $this->visit($stmt); }
-        finally { $this->env = $previousEnv; }
+        try {
+            foreach ($blockCtx->statement() as $stmt) {
+                try {
+                    $this->visit($stmt);
+                } catch (ReturnException $e) {
+                    $this->env = $previousEnv;
+                    throw $e;
+                } catch (BreakException $e) {
+                    $this->env = $previousEnv;
+                    throw $e;
+                } catch (ContinueException $e) {
+                    $this->env = $previousEnv;
+                    throw $e;
+                } catch (Throwable $e) {
+                    $this->semanticError("Error en sentencia: " . $e->getMessage(), $stmt);
+                }
+            }
+        } finally {
+            $this->env = $previousEnv;
+        }
     }
 
     // Sentencia break — lanza excepción para salir del for/switch
