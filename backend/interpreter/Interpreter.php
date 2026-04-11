@@ -43,6 +43,13 @@ class Interpreter extends GolampiBaseVisitor {
     }
     // ─────────────────────────────────────────────────────────────────────────
 
+    private function resolveIndex(int $index, int $size): int {
+        if ($index < 0) {
+            $index = $size + $index;
+        }
+        return $index;
+    }
+
     // Agrega texto a la salida con salto de línea
     private function println($text) {
         if (is_bool($text)) $text = $text ? "true" : "false";
@@ -111,7 +118,9 @@ class Interpreter extends GolampiBaseVisitor {
         return null;
     }
 
+    // =========================================================================
     // PROGRAMA
+    // =========================================================================
     // Punto de entrada: registra funciones y ejecuta main()
     public function visitProgram($ctx) {
 
@@ -135,7 +144,9 @@ class Interpreter extends GolampiBaseVisitor {
         return null;
     }
 
+    // =========================================================================
     // FUNCIONES
+    // =========================================================================
     // Declaración de función: guarda nombre, parámetros y bloque
     public function visitFunctionDecl($ctx) {
 
@@ -235,7 +246,9 @@ class Interpreter extends GolampiBaseVisitor {
         return null;
     }
 
+    // =========================================================================
     // BLOQUES
+    // =========================================================================
     // Bloque de código: crea nuevo scope y ejecuta statements
     public function visitBlock($ctx) {
         $previous  = $this->env;
@@ -273,7 +286,9 @@ class Interpreter extends GolampiBaseVisitor {
     public function visitStatement($ctx)     { return $this->visitChildren($ctx); }
     public function visitStatementCore($ctx) { return $this->visitChildren($ctx); }
 
+    // =========================================================================
     // FUNCIONES BUILT-IN
+    // =========================================================================
     // Llamada a función (built-ins y funciones de usuario)
     public function visitFunctionCall($ctx) {
 
@@ -405,7 +420,9 @@ class Interpreter extends GolampiBaseVisitor {
         }
     }
 
+    // =========================================================================
     // DECLARACION DE VARIABLES Y ARREGLOS
+    // =========================================================================
     // Declaración de variable con var (var x int, var a [5]int)
     public function visitVarDecl($ctx) {
 
@@ -462,7 +479,9 @@ class Interpreter extends GolampiBaseVisitor {
         throw new \Exception("Error interno en varDecl");
     }
 
+    // =========================================================================
     // :=
+    // =========================================================================
     // Declaración corta := (x := 10)
     public function visitShortVarDecl($ctx) {
 
@@ -535,7 +554,9 @@ class Interpreter extends GolampiBaseVisitor {
         return null;
     }
 
+    // =========================================================================
     // ASIGNACIONES
+    // =========================================================================
     // Asignación (=, +=, -=, *=, /=) — soporta variables, arreglos y punteros
     public function visitAssignment($ctx) {
 
@@ -602,8 +623,10 @@ class Interpreter extends GolampiBaseVisitor {
             foreach ($arrayCtx->arrayIndex() as $indexCtx) {
                 $index = $this->visit($indexCtx->expression());
                 if (!is_int($index)) { $this->semanticError("Índice debe ser int", $ctx); return null; }
-                if (!is_array($ref) || $index < 0 || $index >= count($ref)) {
-                    $this->semanticError("Índice fuera de rango [$index] en '$name'", $ctx);
+                if (!is_array($ref)) { $this->semanticError("No es un arreglo '$name'", $ctx); return null; }
+                $index = $this->resolveIndex($index, count($ref));
+                if ($index < 0 || $index >= count($ref)) {
+                    $this->semanticError("Índice fuera de rango en '$name'", $ctx);
                     return null;
                 }
                 $ref =& $ref[$index];
@@ -704,8 +727,11 @@ class Interpreter extends GolampiBaseVisitor {
             $ref       =& $array;
             foreach ($arrayCtx->arrayIndex() as $indexCtx) {
                 $index = $this->visit($indexCtx->expression());
-                if (!is_int($index) || !is_array($ref) || $index < 0 || $index >= count($ref)) {
-                    $this->semanticError("Índice inválido en '$name'", $ctx); return null;
+                if (!is_int($index)) { $this->semanticError("Índice debe ser int", $ctx); return null; }
+                if (!is_array($ref)) { $this->semanticError("No es un arreglo '$name'", $ctx); return null; }
+                $index = $this->resolveIndex($index, count($ref));
+                if ($index < 0 || $index >= count($ref)) {
+                    $this->semanticError("Índice fuera de rango en '$name'", $ctx); return null;
                 }
                 $ref =& $ref[$index];
             }
@@ -853,7 +879,9 @@ class Interpreter extends GolampiBaseVisitor {
         return $left;
     }
 
+    // =========================================================================
     // UNARY — & y *
+    // =========================================================================
     // Expresión unaria: negación (-), NOT (!), referencia (&), desreferencia (*)
     public function visitUnaryExp($ctx) {
 
@@ -898,7 +926,9 @@ class Interpreter extends GolampiBaseVisitor {
         return $this->visitChildren($ctx);
     }
 
+    // =========================================================================
     // POINTER ACCESS — *varName, **varName
+    // =========================================================================
     // Lectura de puntero: *var o **var
     public function visitPointerAccess($ctx) {
 
@@ -928,7 +958,9 @@ class Interpreter extends GolampiBaseVisitor {
         return $value;
     }
 
+    // =========================================================================
     // PRIMARY
+    // =========================================================================
     // Expresión primaria: literales, identificadores, llamadas, arreglos
     public function visitPrimary($ctx) {
 
@@ -1201,8 +1233,10 @@ class Interpreter extends GolampiBaseVisitor {
         foreach ($ctx->arrayIndex() as $indexCtx) {
             $index = $this->visit($indexCtx->expression());
             if (!is_int($index)) { $this->semanticError("Índice debe ser int", $ctx); return null; }
-            if (!is_array($array) || $index < 0 || $index >= count($array)) {
-                $this->semanticError("Índice fuera de rango [$index] en '$name'", $ctx);
+            if (!is_array($array)) { $this->semanticError("No es un arreglo '$name'", $ctx); return null; }
+            $index = $this->resolveIndex($index, count($array));
+            if ($index < 0 || $index >= count($array)) {
+                $this->semanticError("Índice fuera de rango en '$name'", $ctx);
                 return null;
             }
             $array = $array[$index];
