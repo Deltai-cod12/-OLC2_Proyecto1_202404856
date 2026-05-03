@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Golampi Compiler — ARM64</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- ── Barra de acciones ─────────────────────────────────────── -->
+    <header class="toolbar">
+        <div class="brand">
+            <span class="brand-icon">G</span>
+            <span class="brand-name">Golampi Compiler</span>
+            <span class="brand-badge">ARM64</span>
+        </div>
+        <div class="toolbar-actions">
+            <button id="btn-new"     class="btn btn-secondary" title="Nuevo / Limpiar">Nuevo</button>
+            <button id="btn-load"    class="btn btn-secondary" title="Cargar archivo">Cargar</button>
+            <input  id="file-input"  type="file" accept=".golampi,.txt,.go" style="display:none">
+            <button id="btn-save"    class="btn btn-secondary" title="Guardar código">Guardar</button>
+            <button id="btn-compile" class="btn btn-primary"   title="Compilar a ARM64">
+                ⚙ Compilar
+            </button>
+            <button id="btn-clear-console" class="btn btn-secondary">Limpiar Consola</button>
+        </div>
+    </header>
+
+    <!-- ── Layout principal ─────────────────────────────────────── -->
+    <div class="layout">
+
+        <!-- Editor de código -->
+        <section class="panel panel-editor">
+            <div class="panel-header">
+                <span>Editor de Código — Golampi</span>
+                <span id="status-indicator" class="status-idle">●</span>
+            </div>
+            <div class="editor-wrapper">
+                <div class="line-numbers" id="line-numbers">1</div>
+                <textarea
+                    id="code-editor"
+                    class="code-area"
+                    spellcheck="false"
+                    autocomplete="off"
+                    placeholder="// Escribe tu código Golampi aquí...
+func main() {
+    a := 8
+    b := 7
+    var result int32
+    if a > b {
+        result = a
+    } else {
+        result = b
+    }
+    fmt.Println(result)
+}"
+                ></textarea>
+            </div>
+        </section>
+
+        <!-- Consola + Reportes -->
+        <section class="panel panel-right">
+
+            <!-- Consola ARM64 -->
+            <div class="console-wrapper">
+                <div class="panel-header">
+                    <span>Consola — Código ARM64 Generado</span>
+                </div>
+                <pre id="console-output" class="console-output">// El código ARM64 generado aparecerá aquí después de compilar...</pre>
+            </div>
+
+            <!-- Panel de reportes -->
+            <div class="reports-panel">
+                <div class="panel-header"><span>Reportes</span></div>
+                <div class="reports-buttons">
+                    <button id="btn-errors"  class="btn btn-report btn-error" disabled>
+                        ⚠ Ver Errores
+                    </button>
+                    <button id="btn-symbols" class="btn btn-report btn-symbols" disabled>
+                        ☰ Tabla de Símbolos
+                    </button>
+                    <button id="btn-download-asm" class="btn btn-report btn-download" disabled>
+                        ↓ Descargar ARM64
+                    </button>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <!-- ── Modal de reporte ──────────────────────────────────────── -->
+    <div id="modal-overlay" class="modal-overlay hidden">
+        <div class="modal">
+            <div class="modal-header">
+                <span id="modal-title">Reporte</span>
+                <button id="modal-close" class="modal-close">✕</button>
+            </div>
+            <div id="modal-body" class="modal-body"></div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

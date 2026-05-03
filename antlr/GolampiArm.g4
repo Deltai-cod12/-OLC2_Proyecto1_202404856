@@ -1,5 +1,4 @@
-$result = preg_replace('/(?<!\\\\)"/', '\\"', $result);
-grammar Golampi;
+grammar GolampiArm;
 
 /* ---- Reglas sintacticas ---- */
 
