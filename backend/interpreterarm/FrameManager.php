@@ -8,10 +8,17 @@ namespace interpreterarm;
  * DISEÑO:
  *   El layout del frame es el siguiente (crece hacia arriba desde x29):
  *
- *   [x29, #0]   x29 (saved frame pointer) y x30 (link register) — guardados por stp
- *   [x29, #16]  primera variable local (o primer parámetro)
- *   [x29, #24]  segunda variable local
- *   [x29, #32]  ...
+ *   [x29, #0]  ← x29 (saved frame pointer) y x30 (link register) — guardados por stp
+ *   [x29, #16] ← primera variable local (o primer parámetro)
+ *   [x29, #24] ← segunda variable local
+ *   [x29, #32] ← ...
+ *   ...
+ *
+ *   El SP apunta por debajo de x29. El "frameSize" final (el número que va en
+ *   `stp x29, x30, [sp, #-frameSize]!`) se calcula DESPUÉS de visitar todo el
+ *   cuerpo de la función (prólogo diferido), cuando ya se sabe cuántas variables
+ *   se declararon.
+ *  
  */
 class FrameManager
 {
@@ -34,9 +41,9 @@ class FrameManager
      */
     private array $locals = [];
 
-    // ──────────────────────────────────────────────────────────────────────
+    
     //  CICLO DE VIDA
-    // ──────────────────────────────────────────────────────────────────────
+    
 
     /**
      * Inicia un nuevo frame para la función $name.
@@ -60,9 +67,9 @@ class FrameManager
         return $this->getFrameSize();
     }
 
-    // ──────────────────────────────────────────────────────────────────────
+    
     //  ASIGNACIÓN DE SLOTS
-    // ──────────────────────────────────────────────────────────────────────
+    
 
     /**
      * Reserva $bytes bytes en el frame y devuelve el offset (positivo, relativo a x29).
@@ -83,13 +90,22 @@ class FrameManager
 
     /**
      * Registra un símbolo en el frame con el offset calculado.
-     * Si el símbolo ya tiene offset asignado, lo respeta.
+     * Si el símbolo ya tiene offset asignado (offset > 0), lo respeta
+     * y solo lo registra en el mapa local sin volver a asignar.
+     * Esto permite que declareArrayVar pre-asigne el offset con allocate()
+     * y luego registre el símbolo sin doble-asignación.
      */
     public function registerSymbol(ArmSymbol $sym, int $bytes = 8): void
     {
         if (!isset($this->locals[$sym->name])) {
-            $sym->offset              = $this->allocate($bytes);
-            $this->locals[$sym->name] = $sym;
+            if ($sym->offset > 0) {
+                // Offset ya asignado externamente (ej. por allocate() directo)
+                // Solo registrar en el mapa, no volver a llamar allocate()
+                $this->locals[$sym->name] = $sym;
+            } else {
+                $sym->offset              = $this->allocate($bytes);
+                $this->locals[$sym->name] = $sym;
+            }
         }
     }
 
@@ -102,9 +118,9 @@ class FrameManager
         return $this->allocate($bytes);
     }
 
-    // ──────────────────────────────────────────────────────────────────────
+    
     //  CONSULTAS
-    // ──────────────────────────────────────────────────────────────────────
+    
 
     /**
      * Devuelve el tamaño del frame alineado a 16 bytes.
@@ -134,9 +150,9 @@ class FrameManager
         return $this->funcName;
     }
 
-    // ──────────────────────────────────────────────────────────────────────
+    
     //  UTILIDADES
-    // ──────────────────────────────────────────────────────────────────────
+    
 
     /**
      * Redondea $value al múltiplo de $alignment más cercano (hacia arriba).

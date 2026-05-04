@@ -2,6 +2,10 @@
 
 namespace interpreterarm;
 
+require_once __DIR__ . '/FrameManager.php';
+require_once __DIR__ . '/ArmSymbolTable.php';
+
+
 use generated_arm\GolampiArmVisitor;
 use generated_arm\Context\ProgramContext;
 use generated_arm\Context\FunctionDeclContext;
@@ -62,9 +66,6 @@ use reportsarm\SymbolTableReport;
 use Antlr\Antlr4\Runtime\Tree\AbstractParseTreeVisitor;
 use Antlr\Antlr4\Runtime\ParserRuleContext;
 
-require_once __DIR__ . '/FrameManager.php';
-require_once __DIR__ . '/ArmSymbolTable.php';
-
 /**
  * Generador de código ARM64 (AArch64) para el lenguaje Golampi.
  *
@@ -104,6 +105,23 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
     private array $declaredFunctions = [];
 
     /**
+     * Metadatos de arreglo para símbolos (indexado por "funcName:offset" o "global:name").
+     * Reemplaza las propiedades dinámicas $sym->dimensions, $sym->baseType, $sym->isPointerToData
+     * que no existen en ArmSymbol.
+     *
+     * Estructura: [ key => ['dims'=>int[], 'base'=>string, 'isPtr'=>bool] ]
+     */
+    private array $symMeta = [];
+
+    /**
+     * Metadatos de retorno de arreglo para funciones declaradas.
+     * Reemplaza $sym->retArrDims y $sym->retArrBase en el símbolo de función.
+     *
+     * Estructura: [ funcName => [ idx => ['dims'=>int[], 'base'=>string] ] ]
+     */
+    private array $funcRetMeta = [];
+
+    /**
      * Offset del scratch slot usado en emitPrintln para preservar x19.
      * Se asigna al entrar en cada función vía FrameManager::reserveSlot().
      */
@@ -119,9 +137,88 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         $this->symReport   = $symReport;
     }
 
-    // ══════════════════════════════════════════════════════════════════════
+    
+    //  HELPERS DE METADATOS DE ARREGLO
+    //  (evitan depender de propiedades dinámicas en ArmSymbol)
+    
+
+    /**
+     * Genera la clave de metadatos para un símbolo.
+     * Usa scope+name+offset. Para símbolos locales, scope contiene el nombre
+     * de la función tal como lo asigna ArmSymbolTable (puede ser el nombre real
+     * o 'local'). Si dos funciones tienen parámetros con el mismo nombre y offset,
+     * se distinguen por el contexto de función actual almacenado al hacer set.
+     */
+    private function symKey(ArmSymbol $sym, string $funcContext = ''): string
+    {
+        if ($sym->scope === 'global') {
+            return "global:{$sym->name}";
+        }
+        // Para locales usamos funcContext (nombre de función en el momento del set/get)
+        $ctx = $funcContext ?: $this->currentFunc ?: ($sym->scope ?: 'local');
+        return "{$ctx}:{$sym->offset}:{$sym->name}";
+    }
+
+    /** Obtiene los metadatos de arreglo de un símbolo (dims, base, isPtr) */
+    private function getSymMeta(ArmSymbol $sym): array
+    {
+        $default = ['dims' => [], 'base' => 'int32', 'isPtr' => false];
+        // 1. Clave con función actual
+        $key1 = $this->symKey($sym, $this->currentFunc);
+        if (isset($this->symMeta[$key1])) return $this->symMeta[$key1];
+        // 2. Clave con scope puro (guardada como alias en setSymMeta)
+        $scopeKey = ($sym->scope === 'global' ? 'global' : 'local')
+                  . ":{$sym->offset}:{$sym->name}";
+        if (isset($this->symMeta[$scopeKey])) return $this->symMeta[$scopeKey];
+        // 3. Clave con scope real del símbolo
+        $key3 = $this->symKey($sym, $sym->scope ?? '');
+        if (isset($this->symMeta[$key3])) return $this->symMeta[$key3];
+        return $default;
+    }
+
+    /** Establece los metadatos de arreglo de un símbolo — siempre con currentFunc como contexto */
+    private function setSymMeta(ArmSymbol $sym, array $dims, string $base, bool $isPtr = false): void
+    {
+        $meta = ['dims' => $dims, 'base' => $base, 'isPtr' => $isPtr];
+        // Guardar con clave canónica (incluye nombre de función actual)
+        $this->symMeta[$this->symKey($sym, $this->currentFunc)] = $meta;
+        // También guardar con clave de scope puro para lookup cuando currentFunc cambie
+        $scopeKey = ($sym->scope === 'global' ? 'global' : 'local')
+                  . ":{$sym->offset}:{$sym->name}";
+        $this->symMeta[$scopeKey] = $meta;
+    }
+
+    /** Actualiza solo isPtr de un símbolo */
+    private function setSymIsPtr(ArmSymbol $sym, bool $isPtr): void
+    {
+        $key = $this->symKey($sym, $this->currentFunc);
+        if (!isset($this->symMeta[$key])) {
+            $this->symMeta[$key] = ['dims' => [], 'base' => 'int32', 'isPtr' => false];
+        }
+        $this->symMeta[$key]['isPtr'] = $isPtr;
+    }
+
+    /** ¿Es el símbolo un puntero a arreglo? */
+    private function symIsPtr(ArmSymbol $sym): bool
+    {
+        return $this->getSymMeta($sym)['isPtr'];
+    }
+
+    /** Dimensiones del arreglo del símbolo */
+    private function symDims(ArmSymbol $sym): array
+    {
+        return $this->getSymMeta($sym)['dims'];
+    }
+
+    /** Tipo base del arreglo del símbolo */
+    private function symBase(ArmSymbol $sym): string
+    {
+        return $this->getSymMeta($sym)['base'];
+    }
+
+    
     //  RESULTADO FINAL
-    // ══════════════════════════════════════════════════════════════════════
+    
 
     /**
      * Convierte el contenido de un string Golampi a formato .ascii para GNU as.
@@ -185,9 +282,9 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         return implode("\n", $out) . "\n";
     }
 
-    // ══════════════════════════════════════════════════════════════════════
+    
     //  RUNTIME EMBEBIDO
-    // ══════════════════════════════════════════════════════════════════════
+    
 
     private function buildRuntime(): array
     {
@@ -649,9 +746,9 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         return $r;
     }
 
-    // ══════════════════════════════════════════════════════════════════════
+    
     //  UTILIDADES INTERNAS
-    // ══════════════════════════════════════════════════════════════════════
+    
 
     private function emit(string $line): void
     {
@@ -723,9 +820,9 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         }
     }
 
-    // ══════════════════════════════════════════════════════════════════════
+    
     //  VISITOR: PROGRAMA
-    // ══════════════════════════════════════════════════════════════════════
+    
 
     public function visitProgram(ProgramContext $ctx): mixed
     {
@@ -743,6 +840,8 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         $name        = $ctx->IDENTIFIER()->getText();
         $paramTypes  = [];
         $returnTypes = [];
+        $retArrDims  = [];   // dimensiones del tipo de retorno si es arreglo
+        $retArrBase  = [];   // tipo base del tipo de retorno si es arreglo
 
         if ($ctx->params() !== null) {
             foreach ($ctx->params()->param() as $p) {
@@ -752,19 +851,41 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         if ($ctx->returnTypes() !== null) {
             foreach ($ctx->returnTypes()->type() as $rt) {
                 $returnTypes[] = $this->resolveTypeName($rt);
+                // Extraer dimensiones si el retorno es un arreglo
+                if ($rt->arrayType() !== null) {
+                    $dims = [];
+                    foreach ($rt->arrayType()->arrayDimension() as $d) {
+                        $dims[] = (int)$d->INT_LITERAL()->getText();
+                    }
+                    $retArrDims[] = $dims;
+                    $retArrBase[] = ArmSymbolTable::normalizeType(
+                        $rt->arrayType()->baseType()->getText()
+                    );
+                } else {
+                    $retArrDims[] = [];
+                    $retArrBase[] = 'int32';
+                }
             }
         }
 
         $line = $ctx->IDENTIFIER()->getSymbol()->getLine();
         $col  = $ctx->IDENTIFIER()->getSymbol()->getCharPositionInLine();
         $sym  = $this->symTable->declareFunction($name, $paramTypes, $returnTypes, $line, $col);
+        // Guardar metadatos de retorno en el mapa interno (ArmSymbol no tiene estas propiedades)
+        $this->funcRetMeta[$name] = [];
+        foreach ($retArrDims as $idx => $dims) {
+            $this->funcRetMeta[$name][$idx] = [
+                'dims' => $dims,
+                'base' => $retArrBase[$idx] ?? 'int32',
+            ];
+        }
         $this->declaredFunctions[$name] = $sym;
         $this->symReport->addSymbol($name, 'función', 'global', '—', $line, $col + 1);
     }
 
-    // ══════════════════════════════════════════════════════════════════════
+    
     //  VISITOR: FUNCIÓN — PRÓLOGO DIFERIDO
-    // ══════════════════════════════════════════════════════════════════════
+    
 
     public function visitFunctionDecl(FunctionDeclContext $ctx): mixed
     {
@@ -796,20 +917,46 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
             foreach ($ctx->params()->param() as $i => $p) {
                 $pname = $p->IDENTIFIER()->getText();
                 $ptype = $this->resolveTypeName($p->type());
-                $params[] = ['name' => $pname, 'type' => $ptype, 'reg' => 'x' . $i];
+                // Extraer dimensiones si el parámetro es un arreglo
+                $pdims    = [];
+                $pbase    = 'int32';
+                $pisArray = false;
+                if ($p->type()->arrayType() !== null) {
+                    $pisArray = true;
+                    foreach ($p->type()->arrayType()->arrayDimension() as $d) {
+                        $pdims[] = (int)$d->INT_LITERAL()->getText();
+                    }
+                    $pbase = ArmSymbolTable::normalizeType(
+                        $p->type()->arrayType()->baseType()->getText()
+                    );
+                }
+                $params[] = [
+                    'name'    => $pname,
+                    'type'    => $ptype,
+                    'reg'     => 'x' . $i,
+                    'isArray' => $pisArray,
+                    'dims'    => $pdims,
+                    'base'    => $pbase,
+                ];
             }
         }
 
         foreach ($params as $i => $p) {
             $pCtx = $ctx->params()->param()[$i];
             $sym  = $this->symTable->declareLocal(
-                $p['name'], $p['type'], 8,
+                $p['name'], $p['isArray'] ? 'array' : $p['type'], 8,
                 $pCtx->IDENTIFIER()->getSymbol()->getLine(),
                 $pCtx->IDENTIFIER()->getSymbol()->getCharPositionInLine(),
                 false, true
             );
-            // Asignar offset vía FrameManager
+            // Para arreglos como parámetro, el registro contiene un PUNTERO al arreglo
+            // (el llamador pasa add x0, x29, #offset).
+            // Guardamos ese puntero en el frame y marcamos el símbolo como puntero.
             $this->frame->registerSymbol($sym, 8);
+            if ($p['isArray']) {
+                // Guardar dims y base en el mapa interno; marcar como puntero a datos
+                $this->setSymMeta($sym, $p['dims'], $p['base'], true);
+            }
             $this->emit("    str  {$p['reg']}, [x29, #{$sym->offset}]");
             $this->symReport->addSymbol(
                 $p['name'], $p['type'], $name, '—',
@@ -852,9 +999,9 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         return null;
     }
 
-    // ══════════════════════════════════════════════════════════════════════
+    
     //  VISITOR: BLOQUE Y SENTENCIAS
-    // ══════════════════════════════════════════════════════════════════════
+    
 
     public function visitBlock(BlockContext $ctx): mixed
     {
@@ -887,9 +1034,9 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         return null;
     }
 
-    // ══════════════════════════════════════════════════════════════════════
+    
     //  VISITOR: DECLARACIONES DE VARIABLES
-    // ══════════════════════════════════════════════════════════════════════
+    
 
     public function visitVarDecl(VarDeclContext $ctx): mixed
     {
@@ -963,12 +1110,15 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         $totalElems = array_product($dims);
         $totalSize  = $totalElems * 8;
 
-        // Reservar espacio en el frame para el arreglo completo
+        // Reservar espacio PRIMERO en el FrameManager
+        // (antes de declarar el símbolo para que nextOffset avance correctamente)
         $offset = $this->frame->allocate($totalSize);
-        $sym    = $this->symTable->declareLocal($name, 'array', $totalSize, $line, $col);
+
+        // Declarar símbolo SIN pasar por registerSymbol (ya asignamos offset manualmente)
+        $sym             = $this->symTable->declareLocal($name, 'array', $totalSize, $line, $col);
         $sym->offset     = $offset;
-        $sym->dimensions = $dims;
-        $sym->baseType   = ArmSymbolTable::normalizeType($baseType);
+        // Guardar dims y tipo base en el mapa interno
+        $this->setSymMeta($sym, $dims, ArmSymbolTable::normalizeType($baseType), false);
 
         // Inicializar a cero
         for ($i = 0; $i < $totalElems; $i++) {
@@ -992,15 +1142,13 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
     private function declareArrayVarFromLiteral(string $name, ArrayLiteralContext $litCtx, int $line, int $col): void
     {
         if ($this->symTable->existsInCurrentScope($name)) {
-            // Si ya existe, reasignar desde literal (infrecuente pero posible)
             $sym = $this->symTable->lookup($name);
             if ($sym !== null && $litCtx->arrayElements() !== null) {
-                $this->initArrayFromLiteral($litCtx, $sym, $sym->dimensions);
+                $this->initArrayFromLiteral($litCtx, $sym, $this->symDims($sym));
             }
             return;
         }
 
-        // Extraer dimensiones y tipo base del arrayLiteral
         $arrayTypeCtx = $litCtx->arrayType();
         $dims         = [];
         foreach ($arrayTypeCtx->arrayDimension() as $d) {
@@ -1010,11 +1158,10 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         $totalElems = array_product($dims);
         $totalSize  = $totalElems * 8;
 
-        $offset = $this->frame->allocate($totalSize);
-        $sym    = $this->symTable->declareLocal($name, 'array', $totalSize, $line, $col);
-        $sym->offset     = $offset;
-        $sym->dimensions = $dims;
-        $sym->baseType   = ArmSymbolTable::normalizeType($baseType);
+        $offset      = $this->frame->allocate($totalSize);
+        $sym         = $this->symTable->declareLocal($name, 'array', $totalSize, $line, $col);
+        $sym->offset = $offset;
+        $this->setSymMeta($sym, $dims, ArmSymbolTable::normalizeType($baseType), false);
 
         // Inicializar a cero
         for ($i = 0; $i < $totalElems; $i++) {
@@ -1163,20 +1310,28 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
                 $sym = $this->symTable->declareLocal($varName, $type, 8, $line, $col);
                 $this->frame->registerSymbol($sym, 8);
                 $this->emitStoreVar($reg, $sym);
+                // Si el valor es un puntero a arreglo (retorno de función que devuelve array),
+                // marcar el símbolo para que computeArrayOffset lo trate como puntero
+                if ($val instanceof ValResult && $val->isArray) {
+                    $this->setSymMeta($sym, $val->dims, $val->baseType, true);
+                }
                 $this->symReport->addSymbol($varName, $type, $this->currentFunc, '(expr)', $line, $col + 1);
             } else {
                 $sym = $this->symTable->lookup($varName);
                 if ($sym !== null) {
                     $this->emitStoreVar($reg, $sym);
+                    if ($val instanceof ValResult && $val->isArray) {
+                        $this->setSymMeta($sym, $val->dims, $val->baseType, true);
+                    }
                 }
             }
         }
         return null;
     }
 
-    // ══════════════════════════════════════════════════════════════════════
+    
     //  VISITOR: ASIGNACIÓN
-    // ══════════════════════════════════════════════════════════════════════
+    
 
     public function visitAssignment(AssignmentContext $ctx): mixed
     {
@@ -1213,12 +1368,13 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
             $this->emitStoreVar($rhs, $sym);
             return;
         }
-        $this->emitLoadVar('x10', $sym);
+        // Cargar valor actual en x14 para no colisionar con rhs ni con x10-x13
+        $this->emitLoadVar('x14', $sym);
         switch ($op) {
-            case '+=': $this->emit("    add  x9, x10, {$rhs}"); break;
-            case '-=': $this->emit("    sub  x9, x10, {$rhs}"); break;
-            case '*=': $this->emit("    mul  x9, x10, {$rhs}"); break;
-            case '/=': $this->emit("    sdiv x9, x10, {$rhs}"); break;
+            case '+=': $this->emit("    add  x9, x14, {$rhs}"); break;
+            case '-=': $this->emit("    sub  x9, x14, {$rhs}"); break;
+            case '*=': $this->emit("    mul  x9, x14, {$rhs}"); break;
+            case '/=': $this->emit("    sdiv x9, x14, {$rhs}"); break;
         }
         $this->emitStoreVar('x9', $sym);
     }
@@ -1265,9 +1421,9 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         return null;
     }
 
-    // ══════════════════════════════════════════════════════════════════════
+    
     //  VISITOR: INC/DEC
-    // ══════════════════════════════════════════════════════════════════════
+    
 
     public function visitIncDecStmt(IncDecStmtContext $ctx): mixed
     {
@@ -1289,9 +1445,9 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         return null;
     }
 
-    // ══════════════════════════════════════════════════════════════════════
+    
     //  VISITOR: IF
-    // ══════════════════════════════════════════════════════════════════════
+    
 
     public function visitIfStmt(IfStmtContext $ctx): mixed
     {
@@ -1321,9 +1477,9 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         return null;
     }
 
-    // ══════════════════════════════════════════════════════════════════════
+    
     //  VISITOR: SWITCH
-    // ══════════════════════════════════════════════════════════════════════
+    
 
     public function visitSwitchStmt(SwitchStmtContext $ctx): mixed
     {
@@ -1383,9 +1539,9 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         return null;
     }
 
-    // ══════════════════════════════════════════════════════════════════════
+    
     //  VISITOR: FOR
-    // ══════════════════════════════════════════════════════════════════════
+    
 
     public function visitForStmt(ForStmtContext $ctx): mixed
     {
@@ -1429,9 +1585,9 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         return null;
     }
 
-    // ══════════════════════════════════════════════════════════════════════
+    
     //  VISITOR: SIMPLE STATEMENTS (para for/if init)
-    // ══════════════════════════════════════════════════════════════════════
+    
 
     public function visitSimpleStmt(SimpleStmtContext $ctx): mixed
     {
@@ -1468,9 +1624,9 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         return null;
     }
 
-    // ══════════════════════════════════════════════════════════════════════
+    
     //  VISITOR: BREAK / CONTINUE / RETURN
-    // ══════════════════════════════════════════════════════════════════════
+    
 
     public function visitBreakStmt(BreakStmtContext $ctx): mixed
     {
@@ -1512,9 +1668,9 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         return null;
     }
 
-    // ══════════════════════════════════════════════════════════════════════
+    
     //  VISITOR: LLAMADAS A FUNCIÓN
-    // ══════════════════════════════════════════════════════════════════════
+    
 
     public function visitFunctionCallStmt(FunctionCallContext $ctx): mixed
     {
@@ -1550,7 +1706,9 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         // Función de usuario
         foreach ($args as $i => $arg) {
             $argReg = "x{$i}";
-            $val    = $this->visitExpressionTyped($arg, $argReg);
+            // visitExpressionTyped ya emite add x29,#offset para arreglos locales
+            // y ldr [x29,#offset] para parámetros-puntero, gracias a visitPrimaryTyped
+            $val = $this->visitExpressionTyped($arg, $argReg);
             if ($val->reg !== $argReg) {
                 $this->emit("    mov  {$argReg}, {$val->reg}");
             }
@@ -1560,20 +1718,30 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
             $this->emit("    mov  {$destReg}, x0");
         }
 
-        // Intentar inferir tipo de retorno
-        $retType = 'int32';
+        // Inferir tipo de retorno
+        $retType  = 'int32';
+        $retIsArr = false;
+        $retDims  = [];
+        $retBase  = 'int32';
         if (isset($this->declaredFunctions[$funcName])) {
             $fsym = $this->declaredFunctions[$funcName];
             if (!empty($fsym->returnTypes)) {
                 $retType = $fsym->returnTypes[0];
+                // Detectar si el tipo de retorno es un arreglo usando funcRetMeta
+                $retMeta = $this->funcRetMeta[$funcName][0] ?? null;
+                if ($retMeta !== null && !empty($retMeta['dims'])) {
+                    $retIsArr = true;
+                    $retDims  = $retMeta['dims'];
+                    $retBase  = $retMeta['base'];
+                }
             }
         }
-        return new ValResult($destReg, $retType);
+        return new ValResult($destReg, $retType, $retIsArr, $retDims, $retBase);
     }
 
-    // ══════════════════════════════════════════════════════════════════════
+    
     //  EMIT PRINTLN — con tipos correctos
-    // ══════════════════════════════════════════════════════════════════════
+    
 
     private function emitPrintln(array $args, string $dest): void
     {
@@ -1633,7 +1801,8 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
             } elseif ($typeStr === 'bool') {
                 $this->emit("    bl   " . ($isLast ? 'print_bool' : 'print_bool_inline'));
             } elseif ($typeStr === 'rune') {
-                $this->emit("    bl   " . ($isLast ? 'print_rune' : 'print_int_inline'));
+                // rune se imprime como entero (valor Unicode/ASCII numérico)
+                $this->emit("    bl   " . ($isLast ? 'print_int' : 'print_int_inline'));
             } elseif ($typeStr === 'float32') {
                 $this->emit("    bl   " . ($isLast ? 'print_float' : 'print_float_inline'));
             } else {
@@ -1655,7 +1824,8 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         $txt = trim($arg->getText());
         $sym = $this->symTable->lookup($txt);
         if ($sym !== null && $sym->type === 'array') {
-            $total = array_product($sym->dimensions);
+            $dims  = $this->symDims($sym);
+            $total = !empty($dims) ? array_product($dims) : 0;
             $this->emitMovImm($dest, $total);
             return $dest;
         }
@@ -1675,24 +1845,16 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
     }
 
     private function emitNow(string $dest): string
-{
-    $lbl = $this->newStrLabel();
-
-    //  Obtener fecha actual dinámica
-    $now = date("Y-m-d H:i:s");
-
-    //  Escapar por seguridad (por si acaso)
-    $now = addslashes($now);
-
-    //  Insertar en sección .data
-    $this->dataSection[] = "{$lbl}: .asciz \"{$now}\"";
-
-    //  Cargar dirección en registro destino
-    $this->emit("    adrp {$dest}, {$lbl}");
-    $this->emit("    add  {$dest}, {$dest}, :lo12:{$lbl}");
-
-    return $dest;
-}
+    {
+        // Obtener la hora real del sistema en tiempo de compilación
+        $nowStr = date('Y-m-d H:i:s');
+        $lbl    = $this->newStrLabel();
+        $this->dataSection[] = "{$lbl}: .ascii \"{$nowStr}\"";
+        $this->dataSection[] = "    .byte 0";
+        $this->emit("    adrp {$dest}, {$lbl}");
+        $this->emit("    add  {$dest}, {$dest}, :lo12:{$lbl}");
+        return $dest;
+    }
 
     private function emitSubstr(array $args, string $dest): string
     {
@@ -1752,13 +1914,13 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         return $dest;
     }
 
-    // ══════════════════════════════════════════════════════════════════════
+    
     //  VISITOR: EXPRESIONES — NÚCLEO TIPADO
     //
     //  Cada visitXxxToReg retorna un ValResult { reg, type }.
     //  El tipo viaja con el valor para que emitPrintln siempre sepa qué
     //  función de print llamar, independientemente del contexto.
-    // ══════════════════════════════════════════════════════════════════════
+    
 
     /**
      * Punto de entrada principal para evaluar una expresión.
@@ -1931,13 +2093,15 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         }
 
         for ($i = 1; $i < count($operands); $i++) {
-            $op  = $ops[$i - 1] ?? '+';
-            $rhs = $this->visitMultiplicativeTyped($operands[$i], 'x10');
-            if ($rhs->reg !== 'x10') $this->emit("    mov  x10, {$rhs->reg}");
+            $op = $ops[$i - 1] ?? '+';
+            // Usar x14 como scratch del RHS para evitar colisión con x10/x12/x13
+            // que usan computeArrayOffset internamente
+            $rhs = $this->visitMultiplicativeTyped($operands[$i], 'x14');
+            if ($rhs->reg !== 'x14') $this->emit("    mov  x14, {$rhs->reg}");
             if ($op === '+') {
-                $this->emit("    add  {$dest}, {$dest}, x10");
+                $this->emit("    add  {$dest}, {$dest}, x14");
             } else {
-                $this->emit("    sub  {$dest}, {$dest}, x10");
+                $this->emit("    sub  {$dest}, {$dest}, x14");
             }
         }
         return new ValResult($dest, $type);
@@ -1960,33 +2124,49 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         }
 
         for ($i = 1; $i < count($operands); $i++) {
-            $op  = $ops[$i - 1] ?? '*';
-            $rhs = $this->visitUnaryTyped($operands[$i], 'x10');
-            if ($rhs->reg !== 'x10') $this->emit("    mov  x10, {$rhs->reg}");
+            $op = $ops[$i - 1] ?? '*';
+            // Usar x15 como scratch del RHS para evitar colisión con x10-x13
+            // que usan computeArrayOffset internamente (x11,x12,x13)
+            $rhs = $this->visitUnaryTyped($operands[$i], 'x15');
+            if ($rhs->reg !== 'x15') $this->emit("    mov  x15, {$rhs->reg}");
 
             $leftIsFloat  = ($type === 'float32');
             $rightIsFloat = ($rhs->type === 'float32');
 
             if ($op === '*') {
-                $this->emit("    mul  {$dest}, {$dest}, x10");
+                $this->emit("    mul  {$dest}, {$dest}, x15");
                 // float*float → acumula escala x1000 extra → dividir por 1000
                 if ($leftIsFloat && $rightIsFloat) {
-                    $this->emit("    mov  x11, #1000");
-                    $this->emit("    sdiv {$dest}, {$dest}, x11");
+                    $this->emit("    mov  x16, #1000");
+                    $this->emit("    sdiv {$dest}, {$dest}, x16");
                 }
+                // int*float o float*int → escalar el entero x1000 antes de mul
+                // ya está en el resultado, solo marcar tipo
                 if ($leftIsFloat || $rightIsFloat) $type = 'float32';
             } elseif ($op === '/') {
-                // float/float: (a*1000)/(b*1000) = a/b (sin escala) → multiplicar por 1000
                 if ($leftIsFloat && $rightIsFloat) {
-                    $this->emit("    mov  x11, #1000");
-                    $this->emit("    mul  {$dest}, {$dest}, x11");
+                    // (a*1000)/(b*1000) = a/b → para obtener float result * 1000: mult por 1000 primero
+                    $this->emit("    mov  x16, #1000");
+                    $this->emit("    mul  {$dest}, {$dest}, x16");
+                    $this->emit("    sdiv {$dest}, {$dest}, x15");
+                } elseif (!$leftIsFloat && $rightIsFloat) {
+                    // int / float32: (int) / (float*1000) = int*1000 / (float*1000) = int/float (escalado)
+                    // Para resultado float*1000: (int*1000*1000) / (float*1000) = int*1000/float
+                    $this->emit("    mov  x16, #1000");
+                    $this->emit("    mul  {$dest}, {$dest}, x16");
+                    $this->emit("    sdiv {$dest}, {$dest}, x15");
+                } elseif ($leftIsFloat && !$rightIsFloat) {
+                    // float32 / int: (float*1000) / int = float/int * 1000 → correcto
+                    $this->emit("    sdiv {$dest}, {$dest}, x15");
+                } else {
+                    // int / int
+                    $this->emit("    sdiv {$dest}, {$dest}, x15");
                 }
-                $this->emit("    sdiv {$dest}, {$dest}, x10");
                 if ($leftIsFloat || $rightIsFloat) $type = 'float32';
             } else {
                 // módulo: solo enteros
-                $this->emit("    sdiv x11, {$dest}, x10");
-                $this->emit("    msub {$dest}, x11, x10, {$dest}");
+                $this->emit("    sdiv x16, {$dest}, x15");
+                $this->emit("    msub {$dest}, x16, x15, {$dest}");
             }
         }
         return new ValResult($dest, $type);
@@ -2154,6 +2334,23 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
                 $this->emit("    mov  {$dest}, #0");
                 return new ValResult($dest, 'int32');
             }
+            // Si es un arreglo, cargar su DIRECCIÓN BASE (no su primer elemento)
+            // porque los arreglos se pasan/retornan como punteros
+            if ($sym->type === 'array') {
+                if ($this->symIsPtr($sym)) {
+                    // Parámetro arreglo o resultado de función: el slot contiene ya un puntero
+                    $this->emit("    ldr  {$dest}, [x29, #{$sym->offset}]");
+                } elseif ($sym->scope === 'global') {
+                    $this->emit("    adrp {$dest}, {$sym->name}");
+                    $this->emit("    add  {$dest}, {$dest}, :lo12:{$sym->name}");
+                } else {
+                    // Variable local: dirección = x29 + offset
+                    $this->emit("    add  {$dest}, x29, #{$sym->offset}");
+                }
+                // Propagar dims y base para que el llamador pueda usarlos
+                $meta = $this->getSymMeta($sym);
+                return new ValResult($dest, 'array', true, $meta['dims'], $meta['base']);
+            }
             $this->emitLoadVar($dest, $sym);
             return new ValResult($dest, $sym->type);
         }
@@ -2203,9 +2400,9 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         return new ValResult($dest, 'int32');
     }
 
-    // ══════════════════════════════════════════════════════════════════════
+    
     //  ARREGLOS
-    // ══════════════════════════════════════════════════════════════════════
+    
 
     private function loadFromArray(ArrayAccessContext $ctx, string $dest): ValResult
     {
@@ -2220,18 +2417,29 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         }
         $this->computeArrayOffset($sym, $ctx->arrayIndex(), 'x11');
         $this->emit("    ldr  {$dest}, [x11]");
-        $baseType = $sym->baseType ?? 'int32';
+        $baseType = $this->symBase($sym);
         return new ValResult($dest, $baseType);
     }
 
     private function computeArrayOffset(ArmSymbol $sym, array $indices, string $addrReg): void
     {
-        $baseOff = $sym->offset;
-        $this->emit("    add  {$addrReg}, x29, #{$baseOff}");
-        $dims = $sym->dimensions;
+        $meta = $this->getSymMeta($sym);
+        $dims = $meta['dims'];
+
+        // Determinar si el símbolo es un puntero al arreglo (parámetro o retorno de función)
+        // o si los datos están directamente en el frame (variable local)
+        if ($meta['isPtr']) {
+            // Puntero: x29+offset contiene la dirección base del arreglo
+            $this->emit("    ldr  {$addrReg}, [x29, #{$sym->offset}]");
+        } else {
+            // Variable local: los datos están en x29+offset directamente
+            $this->emit("    add  {$addrReg}, x29, #{$sym->offset}");
+        }
+
         foreach ($indices as $i => $idxCtx) {
             $idxVal = $this->visitExpressionTyped($idxCtx->expression(), 'x12');
             if ($idxVal->reg !== 'x12') $this->emit("    mov  x12, {$idxVal->reg}");
+            // stride en bytes = product(dims[i+1..]) * 8
             $stride = 8;
             for ($d = $i + 1; $d < count($dims); $d++) {
                 $stride *= $dims[$d];
@@ -2242,9 +2450,9 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         }
     }
 
-    // ══════════════════════════════════════════════════════════════════════
+    
     //  INFERENCIA DE TIPO (para compatibilidad con código heredado)
-    // ══════════════════════════════════════════════════════════════════════
+    
 
     private function inferExprType(ExpressionContext $ctx): string
     {
@@ -2305,9 +2513,9 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         return 'int32';
     }
 
-    // ══════════════════════════════════════════════════════════════════════
+    
     //  RESOLUCIÓN DE TIPOS
-    // ══════════════════════════════════════════════════════════════════════
+    
 
     private function resolveTypeName(TypeContext $ctx): string
     {
@@ -2328,9 +2536,9 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         return 'int32';
     }
 
-    // ══════════════════════════════════════════════════════════════════════
+    
     //  MÉTODOS VISITOR REQUERIDOS POR LA INTERFAZ (no usados directamente)
-    // ══════════════════════════════════════════════════════════════════════
+    
 
     public function visitParams(ParamsContext $ctx): mixed                         { return null; }
     public function visitParam(ParamContext $ctx): mixed                           { return null; }
@@ -2370,21 +2578,27 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
     public function defaultResult(): mixed { return null; }
 }
 
-// ══════════════════════════════════════════════════════════════════════════
+
 //  CLASE AUXILIAR: ValResult
 //  Transporta el registro y el tipo de Golampi de un valor evaluado.
-// ══════════════════════════════════════════════════════════════════════════
+
 
 /**
  * Resultado de evaluar una expresión.
  *
- * @property string $reg  Registro ARM64 donde quedó el resultado (ej. 'x9')
- * @property string $type Tipo Golampi del valor (ej. 'int32', 'string', 'bool', 'float32', 'rune', 'nil')
+ * @property string $reg      Registro ARM64 donde quedó el resultado (ej. 'x9')
+ * @property string $type     Tipo Golampi del valor (ej. 'int32', 'string', 'bool', 'float32', 'rune', 'nil', 'array')
+ * @property bool   $isArray  true cuando el valor es un puntero a arreglo (retorno de función)
+ * @property array  $dims     Dimensiones del arreglo si isArray=true
+ * @property string $baseType Tipo base del arreglo si isArray=true
  */
 class ValResult
 {
     public function __construct(
         public readonly string $reg,
-        public readonly string $type
+        public readonly string $type,
+        public readonly bool   $isArray  = false,
+        public readonly array  $dims     = [],
+        public readonly string $baseType = 'int32'
     ) {}
 }
