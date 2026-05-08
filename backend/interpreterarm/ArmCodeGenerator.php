@@ -46,6 +46,7 @@ use generated_arm\Context\AdditiveExpContext;
 use generated_arm\Context\MultiplicativeExpContext;
 use generated_arm\Context\UnaryExpContext;
 use generated_arm\Context\PrimaryContext;
+use generated_arm\Context\RangeExpContext;
 use generated_arm\Context\IfStmtContext;
 use generated_arm\Context\SwitchStmtContext;
 use generated_arm\Context\CaseClauseContext;
@@ -137,10 +138,10 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         $this->symReport   = $symReport;
     }
 
-    
+    // ══════════════════════════════════════════════════════════════════════
     //  HELPERS DE METADATOS DE ARREGLO
     //  (evitan depender de propiedades dinámicas en ArmSymbol)
-    
+    // ══════════════════════════════════════════════════════════════════════
 
     /**
      * Genera la clave de metadatos para un símbolo.
@@ -216,9 +217,9 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         return $this->getSymMeta($sym)['base'];
     }
 
-    
+    // ══════════════════════════════════════════════════════════════════════
     //  RESULTADO FINAL
-    
+    // ══════════════════════════════════════════════════════════════════════
 
     /**
      * Convierte el contenido de un string Golampi a formato .ascii para GNU as.
@@ -282,9 +283,9 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         return implode("\n", $out) . "\n";
     }
 
-    
+    // ══════════════════════════════════════════════════════════════════════
     //  RUNTIME EMBEBIDO
-    
+    // ══════════════════════════════════════════════════════════════════════
 
     private function buildRuntime(): array
     {
@@ -746,9 +747,9 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         return $r;
     }
 
-    
+    // ══════════════════════════════════════════════════════════════════════
     //  UTILIDADES INTERNAS
-    
+    // ══════════════════════════════════════════════════════════════════════
 
     private function emit(string $line): void
     {
@@ -820,9 +821,9 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         }
     }
 
-    
+    // ══════════════════════════════════════════════════════════════════════
     //  VISITOR: PROGRAMA
-    
+    // ══════════════════════════════════════════════════════════════════════
 
     public function visitProgram(ProgramContext $ctx): mixed
     {
@@ -883,9 +884,9 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         $this->symReport->addSymbol($name, 'función', 'global', '—', $line, $col + 1);
     }
 
-    
+    // ══════════════════════════════════════════════════════════════════════
     //  VISITOR: FUNCIÓN — PRÓLOGO DIFERIDO
-    
+    // ══════════════════════════════════════════════════════════════════════
 
     public function visitFunctionDecl(FunctionDeclContext $ctx): mixed
     {
@@ -999,9 +1000,9 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         return null;
     }
 
-    
+    // ══════════════════════════════════════════════════════════════════════
     //  VISITOR: BLOQUE Y SENTENCIAS
-    
+    // ══════════════════════════════════════════════════════════════════════
 
     public function visitBlock(BlockContext $ctx): mixed
     {
@@ -1034,9 +1035,9 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         return null;
     }
 
-    
+    // ══════════════════════════════════════════════════════════════════════
     //  VISITOR: DECLARACIONES DE VARIABLES
-    
+    // ══════════════════════════════════════════════════════════════════════
 
     public function visitVarDecl(VarDeclContext $ctx): mixed
     {
@@ -1329,9 +1330,9 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         return null;
     }
 
-    
+    // ══════════════════════════════════════════════════════════════════════
     //  VISITOR: ASIGNACIÓN
-    
+    // ══════════════════════════════════════════════════════════════════════
 
     public function visitAssignment(AssignmentContext $ctx): mixed
     {
@@ -1421,9 +1422,9 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         return null;
     }
 
-    
+    // ══════════════════════════════════════════════════════════════════════
     //  VISITOR: INC/DEC
-    
+    // ══════════════════════════════════════════════════════════════════════
 
     public function visitIncDecStmt(IncDecStmtContext $ctx): mixed
     {
@@ -1445,9 +1446,9 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         return null;
     }
 
-    
+    // ══════════════════════════════════════════════════════════════════════
     //  VISITOR: IF
-    
+    // ══════════════════════════════════════════════════════════════════════
 
     public function visitIfStmt(IfStmtContext $ctx): mixed
     {
@@ -1477,9 +1478,9 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         return null;
     }
 
-    
+    // ══════════════════════════════════════════════════════════════════════
     //  VISITOR: SWITCH
-    
+    // ══════════════════════════════════════════════════════════════════════
 
     public function visitSwitchStmt(SwitchStmtContext $ctx): mixed
     {
@@ -1539,9 +1540,9 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         return null;
     }
 
-    
+    // ══════════════════════════════════════════════════════════════════════
     //  VISITOR: FOR
-    
+    // ══════════════════════════════════════════════════════════════════════
 
     public function visitForStmt(ForStmtContext $ctx): mixed
     {
@@ -1585,9 +1586,9 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         return null;
     }
 
-    
+    // ══════════════════════════════════════════════════════════════════════
     //  VISITOR: SIMPLE STATEMENTS (para for/if init)
-    
+    // ══════════════════════════════════════════════════════════════════════
 
     public function visitSimpleStmt(SimpleStmtContext $ctx): mixed
     {
@@ -1624,9 +1625,9 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         return null;
     }
 
-    
+    // ══════════════════════════════════════════════════════════════════════
     //  VISITOR: BREAK / CONTINUE / RETURN
-    
+    // ══════════════════════════════════════════════════════════════════════
 
     public function visitBreakStmt(BreakStmtContext $ctx): mixed
     {
@@ -1668,9 +1669,9 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         return null;
     }
 
-    
+    // ══════════════════════════════════════════════════════════════════════
     //  VISITOR: LLAMADAS A FUNCIÓN
-    
+    // ══════════════════════════════════════════════════════════════════════
 
     public function visitFunctionCallStmt(FunctionCallContext $ctx): mixed
     {
@@ -1739,9 +1740,9 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         return new ValResult($destReg, $retType, $retIsArr, $retDims, $retBase);
     }
 
-    
+    // ══════════════════════════════════════════════════════════════════════
     //  EMIT PRINTLN — con tipos correctos
-    
+    // ══════════════════════════════════════════════════════════════════════
 
     private function emitPrintln(array $args, string $dest): void
     {
@@ -1914,13 +1915,13 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         return $dest;
     }
 
-    
+    // ══════════════════════════════════════════════════════════════════════
     //  VISITOR: EXPRESIONES — NÚCLEO TIPADO
     //
     //  Cada visitXxxToReg retorna un ValResult { reg, type }.
     //  El tipo viaja con el valor para que emitPrintln siempre sepa qué
     //  función de print llamar, independientemente del contexto.
-    
+    // ══════════════════════════════════════════════════════════════════════
 
     /**
      * Punto de entrada principal para evaluar una expresión.
@@ -2040,13 +2041,27 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
     private function visitRelationalTyped(RelationalExpContext $ctx, string $dest): ValResult
     {
         $operands = $ctx->additiveExp();
+
+        // ── Caso: x in [E1..E2] ───────────────────────────────────────────
+        // relationalExp : additiveExp IN rangeExp
+        if ($ctx->IN() !== null && $ctx->NOT_KW() === null) {
+            return $this->emitInRange($ctx, $dest, false);
+        }
+
+        // ── Caso: x not in [E1..E2] ──────────────────────────────────────
+        // relationalExp : additiveExp NOT_KW IN rangeExp
+        if ($ctx->IN() !== null && $ctx->NOT_KW() !== null) {
+            return $this->emitInRange($ctx, $dest, true);
+        }
+
+        // ── Caso normal: a OP b ───────────────────────────────────────────
         if (count($operands) === 1) {
             return $this->visitAdditiveTyped($operands[0], $dest);
         }
         $left  = $this->visitAdditiveTyped($operands[0], $dest);
-        $right = $this->visitAdditiveTyped($operands[1], 'x10');
-        if ($left->reg !== $dest)   $this->emit("    mov  {$dest}, {$left->reg}");
-        if ($right->reg !== 'x10')  $this->emit("    mov  x10, {$right->reg}");
+        $right = $this->visitAdditiveTyped($operands[1], 'x14');
+        if ($left->reg  !== $dest)  $this->emit("    mov  {$dest}, {$left->reg}");
+        if ($right->reg !== 'x14')  $this->emit("    mov  x14, {$right->reg}");
 
         $op = '';
         for ($i = 0; $i < $ctx->getChildCount(); $i++) {
@@ -2057,7 +2072,7 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
             }
         }
 
-        $this->emit("    cmp  {$dest}, x10");
+        $this->emit("    cmp  {$dest}, x14");
         $lblTrue = $this->newLabel('rel_t');
         $lblEnd  = $this->newLabel('rel_e');
         $branch  = match($op) {
@@ -2072,6 +2087,71 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         $this->emit("    b    {$lblEnd}");
         $this->emitLabel($lblTrue);
         $this->emit("    mov  {$dest}, #1");
+        $this->emitLabel($lblEnd);
+        return new ValResult($dest, 'bool');
+    }
+
+    /**
+     * Genera código para  x in [E1..E2]  o  x not in [E1..E2].
+     *
+     * in     → result = (x >= E1) && (x <= E2)
+     * not in → result = (x < E1)  || (x > E2)
+     *
+     * Se usa short-circuit para eficiencia:
+     *   in:     si x < E1  → false inmediato; si x > E2  → false; else → true
+     *   not in: si x < E1  → true  inmediato; si x > E2  → true;  else → false
+     */
+    private function emitInRange(RelationalExpContext $ctx, string $dest, bool $notIn): ValResult
+    {
+        $rangeCtx = $ctx->rangeExp();
+        $exprs    = $rangeCtx->expression();   // [0] = E1,  [1] = E2
+
+        // Evaluar el valor a comprobar (x) en dest
+        $xVal = $this->visitAdditiveTyped($ctx->additiveExp(0), $dest);
+        if ($xVal->reg !== $dest) $this->emit("    mov  {$dest}, {$xVal->reg}");
+
+        $this->emit("    mov  x17, {$dest}");
+
+        // Evaluar E1 en x14
+        $e1 = $this->visitExpressionTyped($exprs[0], 'x14');
+        if ($e1->reg !== 'x14') $this->emit("    mov  x14, {$e1->reg}");
+
+        // Evaluar E2 en x15
+        $e2 = $this->visitExpressionTyped($exprs[1], 'x15');
+        if ($e2->reg !== 'x15') $this->emit("    mov  x15, {$e2->reg}");
+
+        $lblTrue  = $this->newLabel($notIn ? 'notin_t' : 'in_t');
+        $lblFalse = $this->newLabel($notIn ? 'notin_f' : 'in_f');
+        $lblEnd   = $this->newLabel($notIn ? 'notin_e' : 'in_e');
+
+        if (!$notIn) {
+            // x in [E1..E2] → x >= E1 && x <= E2
+            // Si x < E1 → false
+            $this->emit("    cmp  x17, x14");
+            $this->emit("    b.lt {$lblFalse}");
+            // Si x > E2 → false
+            $this->emit("    cmp  x17, x15");
+            $this->emit("    b.gt {$lblFalse}");
+            // else → true
+            $this->emit("    mov  {$dest}, #1");
+            $this->emit("    b    {$lblEnd}");
+            $this->emitLabel($lblFalse);
+            $this->emit("    mov  {$dest}, #0");
+        } else {
+            // x not in [E1..E2] → x < E1 || x > E2
+            // Si x < E1 → true
+            $this->emit("    cmp  x17, x14");
+            $this->emit("    b.lt {$lblTrue}");
+            // Si x > E2 → true
+            $this->emit("    cmp  x17, x15");
+            $this->emit("    b.gt {$lblTrue}");
+            // else → false
+            $this->emit("    mov  {$dest}, #0");
+            $this->emit("    b    {$lblEnd}");
+            $this->emitLabel($lblTrue);
+            $this->emit("    mov  {$dest}, #1");
+        }
+
         $this->emitLabel($lblEnd);
         return new ValResult($dest, 'bool');
     }
@@ -2196,6 +2276,7 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         if ($op === '-') {
             $this->emit("    neg  {$dest}, {$dest}");
         } elseif ($op === '!') {
+            // Operador logico NOT (símbolo !, token BANG en la gramatica)
             $this->emit("    cmp  {$dest}, #0");
             $lblT = $this->newLabel('not_t');
             $lblE = $this->newLabel('not_e');
@@ -2207,8 +2288,7 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
             $this->emitLabel($lblE);
             $type = 'bool';
         } elseif ($op === '*') {
-            // Desreferenciación de puntero: el valor en dest es una dirección,
-            // cargar lo que apunta.
+            // Desreferenciación de puntero
             $this->emit("    ldr  {$dest}, [{$dest}]");
         }
         return new ValResult($dest, $type);
@@ -2400,9 +2480,9 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         return new ValResult($dest, 'int32');
     }
 
-    
+    // ══════════════════════════════════════════════════════════════════════
     //  ARREGLOS
-    
+    // ══════════════════════════════════════════════════════════════════════
 
     private function loadFromArray(ArrayAccessContext $ctx, string $dest): ValResult
     {
@@ -2450,9 +2530,9 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         }
     }
 
-    
+    // ══════════════════════════════════════════════════════════════════════
     //  INFERENCIA DE TIPO (para compatibilidad con código heredado)
-    
+    // ══════════════════════════════════════════════════════════════════════
 
     private function inferExprType(ExpressionContext $ctx): string
     {
@@ -2513,9 +2593,9 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         return 'int32';
     }
 
-    
+    // ══════════════════════════════════════════════════════════════════════
     //  RESOLUCIÓN DE TIPOS
-    
+    // ══════════════════════════════════════════════════════════════════════
 
     private function resolveTypeName(TypeContext $ctx): string
     {
@@ -2536,9 +2616,9 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
         return 'int32';
     }
 
-    
+    // ══════════════════════════════════════════════════════════════════════
     //  MÉTODOS VISITOR REQUERIDOS POR LA INTERFAZ (no usados directamente)
-    
+    // ══════════════════════════════════════════════════════════════════════
 
     public function visitParams(ParamsContext $ctx): mixed                         { return null; }
     public function visitParam(ParamContext $ctx): mixed                           { return null; }
@@ -2563,6 +2643,7 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
     public function visitLogicalAndExp(LogicalAndExpContext $ctx): mixed           { return null; }
     public function visitEqualityExp(EqualityExpContext $ctx): mixed               { return null; }
     public function visitRelationalExp(RelationalExpContext $ctx): mixed           { return null; }
+    public function visitRangeExp(RangeExpContext $ctx): mixed                    { return null; }
     public function visitAdditiveExp(AdditiveExpContext $ctx): mixed               { return null; }
     public function visitMultiplicativeExp(MultiplicativeExpContext $ctx): mixed   { return null; }
     public function visitUnaryExp(UnaryExpContext $ctx): mixed                     { return null; }
@@ -2578,10 +2659,10 @@ class ArmCodeGenerator extends AbstractParseTreeVisitor implements GolampiArmVis
     public function defaultResult(): mixed { return null; }
 }
 
-
+// ══════════════════════════════════════════════════════════════════════════
 //  CLASE AUXILIAR: ValResult
 //  Transporta el registro y el tipo de Golampi de un valor evaluado.
-
+// ══════════════════════════════════════════════════════════════════════════
 
 /**
  * Resultado de evaluar una expresión.

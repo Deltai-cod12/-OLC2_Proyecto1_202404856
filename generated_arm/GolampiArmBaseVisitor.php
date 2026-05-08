@@ -350,6 +350,17 @@ class GolampiArmBaseVisitor extends AbstractParseTreeVisitor implements GolampiA
 	 * The default implementation returns the result of calling
 	 * {@see self::visitChildren()} on `context`.
 	 */
+	public function visitRangeExp(Context\RangeExpContext $context)
+	{
+	    return $this->visitChildren($context);
+	}
+
+	/**
+	 * {@inheritdoc}
+	 *
+	 * The default implementation returns the result of calling
+	 * {@see self::visitChildren()} on `context`.
+	 */
 	public function visitExpression(Context\ExpressionContext $context)
 	{
 	    return $this->visitChildren($context);

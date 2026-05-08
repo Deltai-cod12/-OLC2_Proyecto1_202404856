@@ -12,9 +12,9 @@ func main() {
 	// ==========================================
 	fmt.Println("\n--- 5.3 INDICE DE INESTABILIDAD ---")
 	matrizInstabilidad := [3][4]int32{
-		{2, 5, 3, 8},
-		{1, 1, 4, 6},
-		{7, 3, 9, 9},
+		{2, 5, 3, 8}
+		{1, 1, 4, 6}
+		{7, 3, 9, 9}
 	}
 	fmt.Println("Indice:", indiceInestabilidad(matrizInstabilidad))
 
@@ -32,8 +32,8 @@ func main() {
 	// ==========================================
 	fmt.Println("\n--- 5.5 PROMEDIO DE CAPAS ---")
 	cubo := [2][2][2]int32{
-		{{1, 3}, {5, 7}},
-		{{2, 4}, {6, 8}},
+		{{1, 3}, {5, 7}}
+		{{2, 4}, {6, 8}}
 	}
 	promedios := promedioCapas(cubo)
 	fmt.Println("Promedios capa 0:", promedios[0][0], promedios[0][1])

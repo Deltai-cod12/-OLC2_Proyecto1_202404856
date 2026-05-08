@@ -412,6 +412,19 @@ class GolampiArmBaseListener implements GolampiArmListener
 	 *
 	 * The default implementation does nothing.
 	 */
+	public function enterRangeExp(Context\RangeExpContext $context): void {}
+
+	/**
+	 * {@inheritdoc}
+	 *
+	 * The default implementation does nothing.
+	 */
+	public function exitRangeExp(Context\RangeExpContext $context): void {}
+	/**
+	 * {@inheritdoc}
+	 *
+	 * The default implementation does nothing.
+	 */
 	public function enterExpression(Context\ExpressionContext $context): void {}
 
 	/**

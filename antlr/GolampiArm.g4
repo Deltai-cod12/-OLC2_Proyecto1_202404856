@@ -165,6 +165,13 @@ args
 : expList
 ;
 
+/* ---- Rango para in / not in ---- */
+
+rangeExp
+: LBRACK expression RANGE expression RBRACK
+;
+
+
 /* ---- Expresiones ---- */
 
 expression
@@ -185,6 +192,8 @@ equalityExp
 
 relationalExp
 : additiveExp ((LESS | LESS_EQUAL | GREATER | GREATER_EQUAL) additiveExp)*
+| additiveExp IN rangeExp
+| additiveExp NOT_KW IN rangeExp
 ;
 
 additiveExp
@@ -196,7 +205,7 @@ multiplicativeExp
 ;
 
 unaryExp
-: NOT unaryExp
+: BANG unaryExp
 | MINUS unaryExp
 | MULT unaryExp
 | AMP unaryExp
@@ -310,6 +319,8 @@ RUNE_TYPE   : 'rune';
 
 TRUE  : 'true';
 FALSE : 'false';
+IN    : 'in';
+NOT_KW: 'not';
 
 /* ---- Símbolos ---- */
 
@@ -322,6 +333,7 @@ RBRACK : ']';
 SEMICOLON : ';';
 COMMA : ',';
 COLON : ':';
+RANGE : '..';
 DOT : '.';
 
 EQUAL : '==';
@@ -343,7 +355,7 @@ DEC : '--';
 
 AND : '&&';
 OR : '||';
-NOT : '!';
+BANG : '!';
 
 PLUS : '+';
 MINUS : '-';

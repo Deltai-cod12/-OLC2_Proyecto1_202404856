@@ -313,6 +313,16 @@ interface GolampiArmListener extends ParseTreeListener {
 	 */
 	public function exitArgs(Context\ArgsContext $context): void;
 	/**
+	 * Enter a parse tree produced by {@see GolampiArmParser::rangeExp()}.
+	 * @param $context The parse tree.
+	 */
+	public function enterRangeExp(Context\RangeExpContext $context): void;
+	/**
+	 * Exit a parse tree produced by {@see GolampiArmParser::rangeExp()}.
+	 * @param $context The parse tree.
+	 */
+	public function exitRangeExp(Context\RangeExpContext $context): void;
+	/**
 	 * Enter a parse tree produced by {@see GolampiArmParser::expression()}.
 	 * @param $context The parse tree.
 	 */

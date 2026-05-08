@@ -284,6 +284,15 @@ interface GolampiArmVisitor extends ParseTreeVisitor
 	public function visitArgs(Context\ArgsContext $context);
 
 	/**
+	 * Visit a parse tree produced by {@see GolampiArmParser::rangeExp()}.
+	 *
+	 * @param Context\RangeExpContext $context The parse tree.
+	 *
+	 * @return mixed The visitor result.
+	 */
+	public function visitRangeExp(Context\RangeExpContext $context);
+
+	/**
 	 * Visit a parse tree produced by {@see GolampiArmParser::expression()}.
 	 *
 	 * @param Context\ExpressionContext $context The parse tree.
